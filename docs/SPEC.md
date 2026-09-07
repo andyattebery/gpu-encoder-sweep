@@ -95,7 +95,7 @@ again.
 | **chain** | the production filter graph per `(lane, host)`, **authored before the sample**: the reference cut is built through it, Stage 7 times it, and Stage 11 ships the same row |
 | **rig parity** | the measurement container is built from **production's image**, so the driver and the userspace are production's; refuse on drift. A separate rig image drifting to a different driver package invalidates the whole dataset |
 | **device** | address the card by **PCI slot**, never a render-node number |
-| **ledger identity** | a distinct `node_label` per card in a multi-card box, or the cell keys collide with the other card's |
+| **unit identity** | a distinct `encoder_unit` per card in a multi-card box, or the cell keys collide with the other card's |
 | **driver** | pinned and recorded on every row; **it is a FACTOR — part of the measurement key**, a column of `encoder_unit`. **A driver change is a new encoder unit, and the column starts again at Stage 1.** Probe the step before spending on it: one driver step moved bytes 14/14 and shifted the quality anchor, the next was inert |
 | **the same harness on the node** | the artifact a plan was built for is the artifact the agent reports; refuse a node already running one |
 | **quiet box** | no other active run on the machine during a timing run |
@@ -137,6 +137,7 @@ measurement invisible — a product never fetched, a column missing so every row
 an exclusion that holds only by accident — are found by reading what came back and by nothing else.
 
 ---
+
 ## The stages
 
 **Each stage answers one question.** It reads named tables, writes named tables or nothing, makes
@@ -428,7 +429,7 @@ changes coverage** — which is why the run declares its windows in `run_window`
 **Does.** Rescales reference and encode **identically** to the search's height (the transform must
 be the same on both sides), runs SSIMULACRA2 and butteraugli through FFVship and one libvmaf pass
 for vmaf, cambi, psnr and float-ssim; records `mean`, `p5` and `min`; writes the scores; **then
-deletes the encode**, because the ledger stores scores, not encodes.
+deletes the encode**, because the store holds scores, not encodes.
 
 **Reads.** `cell` and its kept `encode` · the reference cut, content hash checked · `search.score_height`
 · the scorer build and metric backend, which are in the key.
