@@ -58,6 +58,38 @@ class Handlers(unittest.TestCase):
         self.assertEqual((r.status_code, r.text), (200, '{"ok":true}'))
 
 
+class StatusAndCheck(unittest.TestCase):
+    def setUp(self):
+        self.store = fixture_store()
+        self.addCleanup(self.store.close)
+        self.client = client_for(self.store)
+
+    def test_status_lists_runs_and_blocked_hosts(self):
+        self.client.app.state.queue.enqueue("media-01", "r-next", {})
+        r = self.client.get("/runs/status")
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        run = [x for x in body["runs"] if x["run_id"] == "b580-qsv-av1"][0]
+        self.assertEqual((run["host"], run["stage"], run["state"], run["planned_total"], run["scored"], run["failed"]),
+                         ("media-01", "encode", "complete", 89, 88, 1))
+        self.assertIn({"host": "htpc-01", "blocked": "mount the sweep tree into tdarr-node, point the work root at it, use /ffmpeg/ffmpeg, then clear this"}, body["hosts"])
+        self.assertEqual((body["queue"]["media-01"], body["queue"]["eta"]), (1, 0))
+
+    def test_check_is_ok_on_a_clean_store(self):
+        r = self.client.get("/analysis/check")
+        self.assertEqual((r.status_code, r.text), (200, '{"ok":true}'))
+
+    def test_check_refuses_with_the_first_firing_check_and_lists_the_rest(self):
+        self.store.conn.executescript("DELETE FROM scorer; INSERT INTO routing_exclusion VALUES ('m4-ipad-le1080p-sdr', 'media-01', 'x')")
+        r = self.client.get("/analysis/check")
+        self.assertEqual(r.status_code, 422)
+        lines = r.text.splitlines()
+        self.assertTrue(lines[0].startswith("REFUSING: x_routed_and_excluded: "), lines[0])
+        self.assertTrue(lines[0].endswith(" -- " + self.store.checks["x_routed_and_excluded"]["fix"]), lines[0])
+        self.assertTrue(lines[1].startswith("x_score_run_host_without_scorer: "), lines[1])
+        self.assertEqual(len(lines), 2)
+
+
 class ValidationRefusals(unittest.TestCase):
     def test_nested_field_names_its_path_and_its_flag(self):
         errors = [{"type": "missing", "loc": ("body", "scope", 0, "encoder_unit_id"), "msg": "Field required"}]

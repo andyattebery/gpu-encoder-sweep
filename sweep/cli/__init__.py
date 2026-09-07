@@ -51,6 +51,10 @@ def verb(path, *flags):
     return Verb("POST", path, tuple((f, S) if isinstance(f, str) else f for f in flags))
 
 
+def get(path):
+    return Verb("GET", path, ())
+
+
 VERBS = OrderedDict([
     ("add-host", verb("/catalogue/add-host", "host", "ssh_host", "os", "machine", "work_root", "share_root", "ffmpeg", "local_view", "notes")),
     ("add-unit", verb("/catalogue/add-unit", "encoder_unit_id", "vendor", "card", "driver", "frontend", "codec", "host", "device")),
@@ -78,6 +82,8 @@ VERBS = OrderedDict([
     ("record-viewing", verb("/decision/record-viewing", "kind", "lane", "window_id", "cell_a", "cell_b", "viewed_on", "viewer", "verdict", "notes", "viewed_at")),
     ("ship", verb("/decision/ship", "lane", "host", ("rows", jsonarg))),
     ("exclude-route", verb("/decision/exclude-route", "lane", "host", "reason")),
+    ("status", get("/runs/status")),
+    ("check", get("/analysis/check")),
 ])
 
 
