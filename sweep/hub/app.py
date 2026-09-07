@@ -63,9 +63,10 @@ def create_app(store, queue, token=None):
 def main():
     import uvicorn
 
+    from sweep.hub.queue import FakeQueue
     from sweep.hub.store import Store
 
     store = Store(os.environ.get("SWEEP_STORE", "hub.sqlite"))
-    app = create_app(store, None, token=os.environ.get("SWEEP_TOKEN"))
+    app = create_app(store, FakeQueue(), token=os.environ.get("SWEEP_TOKEN"))   # the Redis queue arrives with the agents (M2)
     host, _, port = os.environ.get("SWEEP_BIND", "127.0.0.1:8000").rpartition(":")
     uvicorn.run(app, host=host or "127.0.0.1", port=int(port))

@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from sweep import model_check as mc
 from sweep.hub.app import create_app
+from sweep.hub.queue import FakeQueue
 from sweep.hub.store import Store
 
 
@@ -19,7 +20,7 @@ def authored_tables(store):
 
 
 def client_for(store, token=None):
-    return TestClient(create_app(store, None, token=token))
+    return TestClient(create_app(store, FakeQueue(), token=token))
 
 
 def post(client, path, body):
