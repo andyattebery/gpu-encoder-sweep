@@ -39,6 +39,11 @@ class SchemaLoads(unittest.TestCase):
             self.assertIsInstance(entry, tuple, f"{k}: SCRIPT_CHECKS gives no (refuses, fix) pair")
             self.assertTrue(entry[1], f"{k} has no fix")
 
+    def test_every_logic_check_constraint_is_named(self):
+        # the store maps a failed CHECK to its fix by name; an enum CHECK stays unnamed (its message is the expression)
+        unnamed = [expr for name, expr in mc.check_constraints() if name is None and not mc.is_enum_check(expr)]
+        self.assertEqual(unnamed, [], "logic CHECKs without a CONSTRAINT name")
+
     def test_every_table_has_one_writer_and_one_class(self):
         tags, _ = mc.parse_tags()
         for t, tg in tags.items():
@@ -56,6 +61,36 @@ class FixtureIsClean(unittest.TestCase):
         results = mc.run_checks(conn, tags)
         bad = {k: v for k, v in results.items() if v}
         self.assertEqual(bad, {})
+
+    def test_preconditions_are_scoped_to_their_stage(self):
+        # five checks are preconditions of a later stage, not store invariants: built verb by verb, the store passes
+        # through these states, and each must be clean
+        tags, _ = mc.parse_tags()
+        # a lane with content before the library is scanned: no title at all is not an empty population
+        conn = mc.load_schema()
+        self.addCleanup(conn.close)
+        conn.executescript("INSERT INTO lane VALUES ('l','av1','incumbent',NULL,NULL,'sdr','native','sdr','n/a','a','s',NULL,1548,'never',NULL,1,NULL)")
+        self.assertEqual(mc.run_checks(conn, tags)["x_has_content_but_empty"], [])
+        # a measured constant before any lane in its scope ships: calibrate comes later than add-constant
+        conn.executescript("INSERT INTO constant VALUES ('HEADROOM',NULL,'fraction','measured',NULL,NULL,NULL,NULL); "
+                           "INSERT INTO constant_scope VALUES ('HEADROOM','l')")
+        self.assertEqual(mc.run_checks(conn, tags)["x_measured_constant_never_calibrated"], [])
+        # the ladder and the incumbent's bar are complete only once the search names its shipping arm
+        conn = mc.load_schema()
+        self.addCleanup(conn.close)
+        mc.load_fixture(conn)
+        conn.executescript("UPDATE search SET shipping_arm_id = NULL; "
+                           "UPDATE cell_setting SET value = '23' WHERE cell_key = 'c-a24-tng' AND setting_id = 'qsv.q'; "
+                           "DELETE FROM score WHERE cell_key = 'c-i30-parks'; UPDATE encode SET kept = 1 WHERE cell_key = 'c-i30-parks'")
+        results = mc.run_checks(conn, tags)
+        self.assertEqual(results["shipping_arm_ladder_complete"], [])
+        self.assertEqual(results["incumbent_arm_scored"], [])
+        # a host with completed runs must be blockable; the refusal is at the moment of use
+        conn = mc.load_schema()
+        self.addCleanup(conn.close)
+        mc.load_fixture(conn)
+        conn.executescript("UPDATE host SET blocked = 'the fix' WHERE host = 'media-01'")
+        self.assertEqual(mc.run_checks(conn, tags)["x_run_on_a_blocked_host"], [])
 
     def test_unit_reading_is_derived_per_window(self):
         conn = mc.load_schema()

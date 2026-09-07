@@ -75,6 +75,24 @@ def parse_tags(sql=None):
     return tables, checks
 
 
+def check_constraints(sql=None):
+    """[(name or None, expression)] for every CHECK in the schema, in order; the name is the CONSTRAINT's."""
+    sql = sql if sql is not None else SCHEMA.read_text()
+    out = []
+    for m in re.finditer(r"(?:CONSTRAINT\s+(\w+)\s+)?CHECK\s*\(", sql):
+        depth, i = 1, m.end()
+        while depth:
+            depth += {"(": 1, ")": -1}.get(sql[i], 0)
+            i += 1
+        out.append((m.group(1), sql[m.end() - 1:i]))
+    return out
+
+
+def is_enum_check(expr):
+    """CHECK (col IN (...)) -- an enumeration or a 0/1 flag: its failure message is the expression, which names the column."""
+    return re.fullmatch(r"\(\s*\w+\s+IN\s+\([^()]*\)\s*\)", expr, re.S) is not None
+
+
 def db_tables(conn):
     return [r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid")]
@@ -436,32 +454,31 @@ INSERT INTO cell_setting VALUES ('g-a','qsv.preset','4','identity'),('g-a','qsv.
 INSERT INTO encode VALUES ('g-a',52000000,6900.0,1439,60.0,'hardware',1),('g-b',44000000,5900.0,1439,60.0,'hardware',1),('g-i',36000000,4800.0,1439,60.0,'hardware',1);
 INSERT INTO viewing_verdict VALUES (1,'pair',NULL,'tng','g-a','g-b','iPad M4 13in','andy','same','not worth the size','2026-09-04');
 -- an acceptance too, of the incumbent's own encode: the viewing the incumbent arm names, and a positive instance of BOTH kinds for the discarded-encode check
-INSERT INTO viewing_verdict VALUES (9,'acceptance','m4-ipad-le1080p-sdr','tng','g-i',NULL,'iPad M4 13in','andy','acceptable','what ships today, at q 30, is acceptable for the lane','2026-09-04');
-UPDATE arm SET accepted_by_viewing = 9 WHERE arm_id = 'arm-i';
+INSERT INTO viewing_verdict VALUES (2,'acceptance','m4-ipad-le1080p-sdr','tng','g-i',NULL,'iPad M4 13in','andy','acceptable','what ships today, at q 30, is acceptable for the lane','2026-09-04');
+UPDATE arm SET accepted_by_viewing = 2 WHERE arm_id = 'arm-i';
 
--- shipping: a measured value on the class, a bitrate-target value computed from a constant,
--- a derived HEVC value, and a no-content value carried from the SDR lane
+-- shipping, in the order `ship` takes it -- every step of one (lane, host) per call, so the ids are the replay's.
+-- le1080p-sdr on media-01: a measured value on the class, a bitrate-target value computed from a constant, the pinned
+-- probe, the remux. gt1080p-sdr on media-01: a derived HEVC value, the probe, the remux, the bitrate target. Then a
+-- no-content value carried from the SDR lane.
 INSERT INTO shipped VALUES
  (1,'m4-ipad-le1080p-sdr','media-01','quality-target-encode','intel-b580-ihd26.2.2-qsv-av1','measured','measurement',NULL,'native-1080p-sdr',1,'SELECT ... FROM score WHERE ...','["RESULTS §4g-ii"]'),
  (2,'m4-ipad-le1080p-sdr','media-01','bitrate-target-encode','intel-b580-ihd26.2.2-qsv-av1','derived','measurement','-b:v is CEILING x HEADROOM; a whole-title VBV settles differently from a window',NULL,1,NULL,'["RESULTS §18.6b"]'),
- (3,'m4-ipad-gt1080p-sdr','media-01','quality-target-encode','nvidia-a4000-595-nvenc-hevc','derived','measurement','budget interpolation between scored qp14 and qp17; confirmed by eye twice',NULL,2,NULL,'["RESULTS §18.4"]'),
- (4,'kids-ipad-2d-animation-hdr','media-01','quality-target-encode','nvidia-a4000-595-nvenc-hevc','no-content','policy','the library has no HDR 2D animation; the SDR lane''s value so the flow has no hole',NULL,2,NULL,'["RESULTS §4a"]');
+ (3,'m4-ipad-le1080p-sdr','media-01','probe','nvidia-a4000-595-nvenc-hevc','derived','policy','the HEVC probe is pinned to qp 14 so it reads the same on every host',NULL,1,NULL,'["TDARR-TRANSCODE-PLAN.md rule 2"]'),
+ (4,'m4-ipad-le1080p-sdr','media-01','remux',NULL,'fixed','policy','container rebuild only; no encoder decision',NULL,NULL,NULL,NULL),
+ (5,'m4-ipad-gt1080p-sdr','media-01','quality-target-encode','nvidia-a4000-595-nvenc-hevc','derived','measurement','budget interpolation between scored qp14 and qp17; confirmed by eye twice',NULL,2,NULL,'["RESULTS §18.4"]'),
+ (6,'m4-ipad-gt1080p-sdr','media-01','probe','nvidia-a4000-595-nvenc-hevc','derived','policy','the HEVC probe is pinned to qp 14 so it reads the same on every host',NULL,1,NULL,NULL),
+ (7,'m4-ipad-gt1080p-sdr','media-01','remux',NULL,'fixed','policy','container rebuild only; no encoder decision',NULL,NULL,NULL,NULL),
+ (8,'m4-ipad-gt1080p-sdr','media-01','bitrate-target-encode','nvidia-a4000-595-nvenc-hevc','derived','measurement','-b:v is CEILING x HEADROOM',NULL,2,NULL,'["RESULTS §18.6b"]'),
+ (9,'kids-ipad-2d-animation-hdr','media-01','quality-target-encode','nvidia-a4000-595-nvenc-hevc','no-content','policy','the library has no HDR 2D animation; the SDR lane''s value so the flow has no hole',NULL,2,NULL,'["RESULTS §4a"]');
 INSERT INTO shipped_setting VALUES
  (1,'qsv.preset','4','identity',NULL),(1,'qsv.b_strategy','0','identity',NULL),(1,'qsv.q','30','identity',NULL),
  (2,'qsv.preset','4','identity',NULL),(2,'qsv.b_strategy','0','identity',NULL),(2,'qsv.b_v','17600000','computed','CEILING'),
- (3,'nvenc.preset','p2','identity',NULL),(3,'nvenc.tune','uhq','identity',NULL),(3,'nvenc.rc','constqp','identity',NULL),(3,'nvenc.qp','15','identity',NULL),
- (4,'nvenc.preset','p3','identity',NULL),(4,'nvenc.cq','34','identity',NULL);
-INSERT INTO shipped VALUES
- (5,'m4-ipad-le1080p-sdr','media-01','probe','nvidia-a4000-595-nvenc-hevc','derived','policy','the HEVC probe is pinned to qp 14 so it reads the same on every host',NULL,1,NULL,'["TDARR-TRANSCODE-PLAN.md rule 2"]'),
- (6,'m4-ipad-le1080p-sdr','media-01','remux',NULL,'fixed','policy','container rebuild only; no encoder decision',NULL,NULL,NULL,NULL),
- (7,'m4-ipad-gt1080p-sdr','media-01','probe','nvidia-a4000-595-nvenc-hevc','derived','policy','the HEVC probe is pinned to qp 14 so it reads the same on every host',NULL,1,NULL,NULL),
- (8,'m4-ipad-gt1080p-sdr','media-01','remux',NULL,'fixed','policy','container rebuild only; no encoder decision',NULL,NULL,NULL,NULL),
- (9,'m4-ipad-gt1080p-sdr','media-01','bitrate-target-encode','nvidia-a4000-595-nvenc-hevc','derived','measurement','-b:v is CEILING x HEADROOM',NULL,2,NULL,'["RESULTS §18.6b"]');
-INSERT INTO shipped_setting VALUES
- (5,'nvenc.preset','p2','identity',NULL),(5,'nvenc.tune','uhq','identity',NULL),(5,'nvenc.rc','constqp','identity',NULL),(5,'nvenc.qp','14','identity',NULL),
- (7,'nvenc.preset','p2','identity',NULL),(7,'nvenc.tune','uhq','identity',NULL),(7,'nvenc.rc','constqp','identity',NULL),(7,'nvenc.qp','14','identity',NULL),
- (9,'nvenc.preset','p2','identity',NULL),(9,'nvenc.tune','uhq','identity',NULL),(9,'nvenc.rc','vbr','identity',NULL),(9,'nvenc.b_v','17600000','computed','CEILING');
--- routing is complete per SHIPPED lane: the AV1 lane ships on media-01, and eta's unit of its codec is excluded with the reason
+ (3,'nvenc.preset','p2','identity',NULL),(3,'nvenc.tune','uhq','identity',NULL),(3,'nvenc.rc','constqp','identity',NULL),(3,'nvenc.qp','14','identity',NULL),
+ (5,'nvenc.preset','p2','identity',NULL),(5,'nvenc.tune','uhq','identity',NULL),(5,'nvenc.rc','constqp','identity',NULL),(5,'nvenc.qp','15','identity',NULL),
+ (6,'nvenc.preset','p2','identity',NULL),(6,'nvenc.tune','uhq','identity',NULL),(6,'nvenc.rc','constqp','identity',NULL),(6,'nvenc.qp','14','identity',NULL),
+ (8,'nvenc.preset','p2','identity',NULL),(8,'nvenc.tune','uhq','identity',NULL),(8,'nvenc.rc','vbr','identity',NULL),(8,'nvenc.b_v','17600000','computed','CEILING'),
+ (9,'nvenc.preset','p3','identity',NULL),(9,'nvenc.cq','34','identity',NULL);
 INSERT INTO routing_exclusion VALUES
  ('m4-ipad-le1080p-sdr','eta','eta is not yet measured on this class: the B580 column exists and eta has none');
 """
@@ -491,14 +508,14 @@ SCRIPT_CHECKS = OrderedDict([
                                        "equal the arm's plus its pinned anchor",
                                        "author-search with the incumbent's settings and pinned anchor equal to the encode the "
                                        "acceptance viewing viewed")),
-    ("shipping_arm_ladder_complete", ("the arm that ships has every rung of the codec ladder inside the anchor's range encoded "
-                                      "on every member of the class, so any rung that ships was measured; a rung past the range "
-                                      "is UNREACHABLE, not missing",
+    ("shipping_arm_ladder_complete", ("once a search names its shipping arm, that arm has every rung of the codec ladder inside the "
+                                      "anchor's range encoded on every member of the class, so any rung that ships was measured; "
+                                      "a rung past the range is UNREACHABLE, not missing",
                                       "encode the shipping arm at every in-range rung on every member of the class before "
                                       "set-shipping-arm")),
-    ("incumbent_arm_scored", ("an incumbent arm is encoded at its pinned anchor on every member of the class and scored at the "
-                              "search's height, so the bar the incumbent rule reads was measured on this class and unit; "
-                              "the cell may be the base arm's",
+    ("incumbent_arm_scored", ("once a search names its shipping arm, its incumbent arm is encoded at its pinned anchor on every "
+                              "member of the class and scored at the search's height, so the bar the incumbent rule reads was "
+                              "measured on this class and unit; the cell may be the base arm's",
                               "encode and score the incumbent at its pinned anchor on every member of the class before "
                               "set-shipping-arm")),
     ("content_rate_meets_floor", ("content minutes per wall minute per (lane, host) at the shipped setting and worker count "
@@ -592,13 +609,11 @@ def check_incumbent_viewings(conn):
 
 
 def check_shipping_arm_ladders(conn):
+    """Once a search names its shipping arm (Stage 10's precondition), that arm was encoded at every in-range rung on every member."""
     out = []
-    for search_id, cc, unit, anchor, ship in conn.execute(
-            "SELECT search_id, content_class_id, encoder_unit_id, anchor_setting_id, shipping_arm_id FROM search"):
-        arm = ship or (conn.execute("SELECT arm_id FROM arm WHERE search_id = ? AND role = 'base'", (search_id,)).fetchone() or [None])[0]
-        if arm is None:
-            out.append((search_id, "no base arm"))
-            continue
+    for search_id, cc, unit, anchor, arm in conn.execute(
+            "SELECT search_id, content_class_id, encoder_unit_id, anchor_setting_id, shipping_arm_id FROM search "
+            "WHERE shipping_arm_id IS NOT NULL"):
         settings = frozenset(conn.execute("SELECT setting_id, value FROM arm_setting WHERE arm_id = ?", (arm,)).fetchall())
         (codec,) = conn.execute("SELECT codec FROM encoder_unit WHERE encoder_unit_id = ?", (unit,)).fetchone()
         lo, hi = conn.execute("SELECT range_lo, range_hi FROM setting WHERE setting_id = ?", (anchor,)).fetchone()
@@ -617,11 +632,13 @@ def check_shipping_arm_ladders(conn):
 
 
 def check_incumbent_arms_scored(conn):
-    """The bar the incumbent rule reads must exist: a scored cell at the pinned anchor on every member."""
+    """The bar the incumbent rule reads must exist once the search names its shipping arm: a scored cell at the pinned
+    anchor on every member."""
     out = []
     for arm_id, search_id, cc, unit, anchor, anchor_value, height in conn.execute(
             "SELECT a.arm_id, s.search_id, s.content_class_id, s.encoder_unit_id, s.anchor_setting_id, a.anchor_value, "
-            "s.score_height FROM arm a JOIN search s ON s.search_id = a.search_id WHERE a.role = 'incumbent'"):
+            "s.score_height FROM arm a JOIN search s ON s.search_id = a.search_id "
+            "WHERE a.role = 'incumbent' AND s.shipping_arm_id IS NOT NULL"):
         want = frozenset(conn.execute("SELECT setting_id, value FROM arm_setting WHERE arm_id = ?", (arm_id,)).fetchall()) \
             | {(anchor, anchor_value)}
         missing = []
@@ -759,8 +776,8 @@ MUTATIONS = [
     ("an incumbent arm no viewing accepted", "UPDATE arm SET accepted_by_viewing = NULL WHERE arm_id = 'arm-i'",
      "x_incumbent_arm_not_viewed"),
     ("an incumbent arm accepted by a viewing of a different configuration",
-     "INSERT INTO viewing_verdict VALUES (2, 'acceptance', 'm4-ipad-le1080p-sdr', 'tng', 'g-a', NULL, 'iPad M4 13in', 'andy', 'acceptable', NULL, '2026-09-04'); "
-     "UPDATE arm SET accepted_by_viewing = 2 WHERE arm_id = 'arm-i'",
+     "INSERT INTO viewing_verdict VALUES (3, 'acceptance', 'm4-ipad-le1080p-sdr', 'tng', 'g-a', NULL, 'iPad M4 13in', 'andy', 'acceptable', NULL, '2026-09-04'); "
+     "UPDATE arm SET accepted_by_viewing = 3 WHERE arm_id = 'arm-i'",
      "incumbent_viewing_matches_arm"),
     ("an incumbent arm with no scored cell at its pinned anchor on a member",
      "DELETE FROM score WHERE cell_key = 'c-i30-parks'; UPDATE encode SET kept = 1 WHERE cell_key = 'c-i30-parks'",
@@ -789,7 +806,7 @@ MUTATIONS = [
     ("a shipped lane's other host has neither a route nor a reason",
      "DELETE FROM routing_exclusion WHERE lane = 'm4-ipad-le1080p-sdr' AND host = 'eta'",
      "x_supported_lane_not_routed"),
-    ("a shipped unit that is not in that host", "UPDATE shipped SET host = 'eta' WHERE shipped_id = 3",
+    ("a shipped unit that is not in that host", "UPDATE shipped SET host = 'eta' WHERE shipped_id = 5",
      "x_shipped_unit_not_on_host"),
     ("routed and excluded at once", "INSERT INTO routing_exclusion VALUES ('m4-ipad-le1080p-sdr', 'media-01', 'contradiction')",
      "x_routed_and_excluded"),
@@ -801,7 +818,8 @@ MUTATIONS = [
      "x_run_state_disagrees_with_events"),
     ("a timing run beside another active run on its machine", "UPDATE run SET state = 'running' WHERE run_id IN ('b580-qsv-av1', 'b580-qsv-av1-time')",
      "x_timing_run_not_alone"),
-    ("a run on a blocked host", "UPDATE host SET blocked = 'the fix' WHERE host = 'media-01'",
+    ("an active run on a blocked host",
+     "UPDATE run SET state = 'running' WHERE run_id = 'b580-qsv-av1-screen'; UPDATE host SET blocked = 'the fix' WHERE host = 'media-01'",
      "x_run_on_a_blocked_host"),
     ("a score run whose parent is a timing run", "UPDATE run SET parent_run_id = 'b580-qsv-av1-time' WHERE run_id = 'b580-qsv-av1-score'",
      "x_score_run_without_parent"),
@@ -863,7 +881,7 @@ DDL_REFUSALS = [
     ("a score with no height", "INSERT INTO score VALUES ('b580-qsv-av1-score', 'c-a24-tng', NULL, 'vmaf', 'p5', 1.0, 'S1', 'x')"),
     ("a shipped step the lane does not have", "INSERT INTO shipped (lane, host, step, provenance, decided_by) VALUES ('kids-ipad-standard-sdr','media-01','remux','derived','measurement')"),
     ("measured with no evidence class", "UPDATE shipped SET content_class_id = NULL WHERE shipped_id = 1"),
-    ("a policy decision with no reason", "UPDATE shipped SET reason = NULL WHERE shipped_id = 4"),
+    ("a policy decision with no reason", "UPDATE shipped SET reason = NULL WHERE shipped_id = 9"),
     ("a classified cut check with no reason", "INSERT INTO cut_check VALUES ('tng.ref','dv_rpu','classified',NULL,'2026-08-26')"),
     ("a derived constant with no precision", "INSERT INTO constant VALUES ('X', 1.0, 'u', 'derived', '{}', NULL, NULL, NULL)"),
     ("a policy constant with no reason", "INSERT INTO constant VALUES ('Y', 0.5, 'u', 'policy', NULL, NULL, NULL, NULL)"),
@@ -873,10 +891,10 @@ DDL_REFUSALS = [
     ("a second ladder for a codec", "INSERT INTO ladder VALUES ('av1-b','av1')"),
     ("a target-bound lane with no target", "UPDATE lane SET decision_rule = 'target' WHERE lane = 'kids-ipad-standard-sdr'"),
     ("a measured constant with a typed value", "UPDATE constant SET value = 20 WHERE name = 'BOUND'"),
-    ("an acceptance viewing with no lane", "INSERT INTO viewing_verdict VALUES (3, 'acceptance', NULL, 'tng', 'g-a', NULL, 'd', 'v', 'acceptable', NULL, '2026-09-04')"),
-    ("a pair viewing with one encode", "INSERT INTO viewing_verdict VALUES (3, 'pair', NULL, 'tng', 'g-a', NULL, 'd', 'v', 'same', NULL, '2026-09-04')"),
-    ("a remux row that is not fixed", "UPDATE shipped SET provenance = 'derived' WHERE shipped_id = 6"),
-    ("a fixed provenance on an encode step", "UPDATE shipped SET provenance = 'fixed' WHERE shipped_id = 3"),
+    ("an acceptance viewing with no lane", "INSERT INTO viewing_verdict VALUES (4, 'acceptance', NULL, 'tng', 'g-a', NULL, 'd', 'v', 'acceptable', NULL, '2026-09-04')"),
+    ("a pair viewing with one encode", "INSERT INTO viewing_verdict VALUES (4, 'pair', NULL, 'tng', 'g-a', NULL, 'd', 'v', 'same', NULL, '2026-09-04')"),
+    ("a remux row that is not fixed", "UPDATE shipped SET provenance = 'derived' WHERE shipped_id = 4"),
+    ("a fixed provenance on an encode step", "UPDATE shipped SET provenance = 'fixed' WHERE shipped_id = 5"),
     ("an EXCLUDED verdict with no reason", "INSERT INTO setting_verdict VALUES (9, 'intel-b580-ihd26.2.2-qsv-av1', 'qsv.tile_cols', 'tng', 'EXCLUDED', NULL, NULL, NULL, NULL, NULL)"),
     ("a device addressed by render node", "INSERT INTO host_unit VALUES ('htpc-01', 'nvidia-5060ti-595-nvenc-av1', '/dev/dri/renderD128')"),
     ("a failure with no stderr", "INSERT INTO cell_failure VALUES ('c-b24-tng', '2026-09-02', NULL, 1)"),

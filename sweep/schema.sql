@@ -56,8 +56,9 @@ CREATE TABLE encoder_unit (                                 -- the measurement k
 CREATE TABLE host_unit (                                    -- which units are in which box; routing reads it, the key does not
   host            TEXT NOT NULL REFERENCES host,
   encoder_unit_id TEXT NOT NULL REFERENCES encoder_unit,
-  device          TEXT NOT NULL CHECK (device NOT LIKE '%renderD%'),   -- by PCI slot or a stable id; never a render-node number, which inverted twice
-  PRIMARY KEY (host, encoder_unit_id)
+  device          TEXT NOT NULL,                            -- by PCI slot or a stable id; never a render-node number, which inverted twice
+  PRIMARY KEY (host, encoder_unit_id),
+  CONSTRAINT host_unit_device_by_slot CHECK (device NOT LIKE '%renderD%')
 ) STRICT;
 
 -- @group reference
@@ -94,7 +95,7 @@ CREATE TABLE setting (
   range_hi    REAL,
   is_generic  INTEGER NOT NULL CHECK (is_generic IN (0,1)), -- a generic ffmpeg option, absent from every private dump
   notes       TEXT,
-  CHECK ((frontend IS NULL) = (is_generic = 1))
+  CONSTRAINT setting_generic_has_no_frontend CHECK ((frontend IS NULL) = (is_generic = 1))
 ) STRICT;
 
 -- @group reference
@@ -139,9 +140,9 @@ CREATE TABLE constant (                                     -- the numbers the f
   precision   TEXT,                                         -- e.g. ±~10%
   reason      TEXT,                                         -- policy: why this value, and what bounds it
   cites_json  TEXT,
-  CHECK (provenance <> 'derived' OR (inputs_json IS NOT NULL AND precision IS NOT NULL)),
-  CHECK (provenance <> 'policy' OR reason IS NOT NULL),
-  CHECK ((provenance IN ('derived','policy')) = (value IS NOT NULL))
+  CONSTRAINT constant_derived_has_inputs_and_precision CHECK (provenance <> 'derived' OR (inputs_json IS NOT NULL AND precision IS NOT NULL)),
+  CONSTRAINT constant_policy_has_reason CHECK (provenance <> 'policy' OR reason IS NOT NULL),
+  CONSTRAINT constant_value_iff_not_measured CHECK ((provenance IN ('derived','policy')) = (value IS NOT NULL))
 ) STRICT;
 
 -- @group reference
@@ -165,9 +166,9 @@ CREATE TABLE lane (                                         -- TDARR-TRANSCODE-P
   bitrate_cap_constant TEXT REFERENCES constant,            -- the CEILING, where a cap exists
   has_content          INTEGER NOT NULL CHECK (has_content IN (0,1)),
   min_content_rate     REAL,                                -- the deadline: content minutes per wall minute a host must reach; NULL = report only
-  CHECK ((decision_rule = 'target') = (score_target IS NOT NULL)),
-  CHECK (decision_rule <> 'cap' OR bitrate_cap_constant IS NOT NULL),
-  CHECK ((bitrate_cap_binds = 'never') = (bitrate_cap_constant IS NULL))
+  CONSTRAINT lane_target_has_score_target CHECK ((decision_rule = 'target') = (score_target IS NOT NULL)),
+  CONSTRAINT lane_cap_names_constant CHECK (decision_rule <> 'cap' OR bitrate_cap_constant IS NOT NULL),
+  CONSTRAINT lane_cap_binds_iff_constant CHECK ((bitrate_cap_binds = 'never') = (bitrate_cap_constant IS NULL))
 ) STRICT;
 
 -- @group reference
@@ -241,7 +242,7 @@ CREATE TABLE title (                                        -- the POPULATION: o
   audio_layout    TEXT,
   subtitle_layout TEXT,
   scanned_at      TEXT NOT NULL,
-  CHECK ((dynamic_range = 'dv') = (dv_profile IS NOT NULL))
+  CONSTRAINT title_dv_has_profile CHECK ((dynamic_range = 'dv') = (dv_profile IS NOT NULL))
 ) STRICT;
 
 -- @group sample
@@ -310,7 +311,7 @@ CREATE TABLE content_class_stratum (                        -- THE FRAME: how th
   min_windows      INTEGER NOT NULL DEFAULT 1,
   share_estimate   REAL,                                    -- character strata only: judgement, and says so
   PRIMARY KEY (content_class_id, stratum),
-  CHECK ((kind = 'character') = (share_estimate IS NOT NULL))
+  CONSTRAINT stratum_character_has_share CHECK ((kind = 'character') = (share_estimate IS NOT NULL))
 ) STRICT;
 
 -- @group sample
@@ -330,7 +331,8 @@ CREATE TABLE cut (                                          -- one window's file
   tags_pinned      TEXT,
   UNIQUE (reference_set_id, window_id, kind),
   FOREIGN KEY (chain_lane, chain_host, chain_unit) REFERENCES chain (lane, host, encoder_unit_id),
-  CONSTRAINT cut_reference_names_chain CHECK ((kind = 'reference') = (chain_lane IS NOT NULL)   -- all three parts or none: SQLite skips a composite FK with a NULL in it
+  -- a reference cut names its chain by all three parts, or none: SQLite skips a composite FK with a NULL in it
+  CONSTRAINT cut_reference_names_chain CHECK ((kind = 'reference') = (chain_lane IS NOT NULL)
     AND (chain_lane IS NULL) = (chain_host IS NULL) AND (chain_lane IS NULL) = (chain_unit IS NULL))
 ) STRICT;
 
@@ -344,7 +346,7 @@ CREATE TABLE cut_check (                                    -- a content check, 
   reason     TEXT,
   checked_at TEXT NOT NULL,
   PRIMARY KEY (cut_id, check_name, checked_at),
-  CHECK (result <> 'classified' OR reason IS NOT NULL)     -- a classification needs a reason
+  CONSTRAINT cut_check_classified_has_reason CHECK (result <> 'classified' OR reason IS NOT NULL)   -- a classified row's reason is authored through classify-cut
 ) STRICT;
 
 -- ============================================================================ MEASUREMENT
@@ -373,7 +375,7 @@ CREATE TABLE run (                                          -- one invocation
   state            TEXT NOT NULL DEFAULT 'planned' CHECK (state IN ('planned','launched','running','complete','failed','abandoned')),
   fetched_at       TEXT,                                    -- when the product reached the store
   verified_at      TEXT,                                    -- when count and heights were checked against the plan
-  CHECK (state <> 'complete' OR verified_at IS NOT NULL),
+  CONSTRAINT run_complete_is_verified CHECK (state <> 'complete' OR verified_at IS NOT NULL),
   CONSTRAINT run_unit_by_stage CHECK ((stage IN ('inventory','verify')) = (encoder_unit_id IS NULL)),  -- a scan and a content check use no encoder; every other stage names one
   CONSTRAINT run_score_has_parent CHECK ((stage = 'score') = (parent_run_id IS NOT NULL))               -- a score run scores a parent; nothing else has one
 ) STRICT;
@@ -430,7 +432,7 @@ CREATE TABLE encode (
   frames       INTEGER NOT NULL,
   duration_s   REAL NOT NULL,
   decode_path  TEXT NOT NULL CHECK (decode_path IN ('hardware','software')),
-  kept         INTEGER NOT NULL CHECK (kept IN (0,1))      -- most stages discard; gone and never-made must differ
+  kept         INTEGER NOT NULL CHECK (kept IN (0,1))      -- most stages discard; gone and never-made must differ. Flipped by ingest on the score record: the one column with a second writer
 ) STRICT;
 
 -- @group measurement
@@ -519,7 +521,7 @@ CREATE TABLE setting_verdict (                              -- PER WINDOW; the u
   noise_floor_pct REAL,
   reason          TEXT,                                     -- EXCLUDED needs one
   UNIQUE (encoder_unit_id, setting_id, window_id, base_setting_id, base_value),
-  CHECK (verdict <> 'EXCLUDED' OR reason IS NOT NULL)
+  CONSTRAINT verdict_excluded_has_reason CHECK (verdict <> 'EXCLUDED' OR reason IS NOT NULL)
 ) STRICT;
 
 -- @group measurement
@@ -581,7 +583,7 @@ CREATE TABLE arm (                                          -- a candidate: one 
   accepted_by_viewing INTEGER REFERENCES viewing_verdict,   -- an incumbent arm names the acceptance viewing that says it is acceptable
   anchor_value TEXT,                                        -- the incumbent is PINNED at the anchor it ships and its cell may be the base arm's; the base and the candidates sweep the anchor
   UNIQUE (search_id, name),
-  CHECK ((role = 'incumbent') = (anchor_value IS NOT NULL))
+  CONSTRAINT arm_incumbent_is_pinned CHECK ((role = 'incumbent') = (anchor_value IS NOT NULL))
 ) STRICT;
 
 -- @group measurement
@@ -657,9 +659,9 @@ CREATE TABLE shipped (                                      -- ONE value per (la
   cites_json       TEXT,
   UNIQUE (lane, host, step),
   FOREIGN KEY (lane, step) REFERENCES lane_step (lane, step),
-  CHECK (provenance <> 'measured' OR content_class_id IS NOT NULL),
-  CHECK (decided_by <> 'policy' OR reason IS NOT NULL),
-  CHECK ((step = 'remux') = (provenance = 'fixed'))
+  CONSTRAINT shipped_measured_has_class CHECK (provenance <> 'measured' OR content_class_id IS NOT NULL),
+  CONSTRAINT shipped_policy_has_reason CHECK (decided_by <> 'policy' OR reason IS NOT NULL),
+  CONSTRAINT shipped_remux_is_fixed CHECK ((step = 'remux') = (provenance = 'fixed'))
 ) STRICT;
 
 -- @group decision
@@ -672,7 +674,7 @@ CREATE TABLE shipped_setting (                              -- the same shape as
   role          TEXT NOT NULL CHECK (role IN ('identity','computed','default_resolved')),
   from_constant TEXT REFERENCES constant,                   -- a computed value names the constant it came from
   PRIMARY KEY (shipped_id, setting_id),
-  CHECK (role = 'computed' OR from_constant IS NULL)
+  CONSTRAINT shipped_setting_constant_is_computed CHECK (role = 'computed' OR from_constant IS NULL)
 ) STRICT;
 
 
@@ -701,9 +703,9 @@ CREATE TABLE viewing_verdict (                              -- a person's verdic
   verdict   TEXT NOT NULL CHECK (verdict IN ('a','b','same','unsure','acceptable','not_acceptable')),
   notes     TEXT,
   viewed_at TEXT NOT NULL,
-  CHECK ((kind = 'pair') = (cell_b IS NOT NULL)),
-  CHECK ((kind = 'acceptance') = (lane IS NOT NULL)),
-  CHECK ((kind = 'pair' AND verdict IN ('a','b','same','unsure'))
+  CONSTRAINT viewing_pair_has_two_cells CHECK ((kind = 'pair') = (cell_b IS NOT NULL)),
+  CONSTRAINT viewing_acceptance_names_a_lane CHECK ((kind = 'acceptance') = (lane IS NOT NULL)),
+  CONSTRAINT viewing_verdict_fits_kind CHECK ((kind = 'pair' AND verdict IN ('a','b','same','unsure'))
       OR (kind = 'acceptance' AND verdict IN ('acceptable','not_acceptable','unsure')))
 ) STRICT;
 
@@ -782,11 +784,12 @@ CREATE VIEW v_run_progress AS
 
 -- ============================================================================ CHECKS (x_*): each must return ZERO rows
 
--- @check a lane marked has_content whose population is EMPTY (the other direction is judgement: flow membership narrows)
+-- @check a lane marked has_content whose population is EMPTY once the library is scanned (the other direction is judgement: flow membership narrows)
 -- @fix add-lane with input bounds a scanned title fits, or with has_content 0; an empty population is not a lane with content
 CREATE VIEW x_has_content_but_empty AS
   SELECT l.lane FROM lane l
    WHERE l.has_content = 1
+     AND EXISTS (SELECT 1 FROM title)                          -- a lane is authored before the scan; an empty inventory is not an empty population
      AND NOT EXISTS (SELECT 1 FROM v_lane_population p WHERE p.lane = l.lane);
 
 -- @check a shipped quality anchor that is not a rung on its lane's codec's ladder
@@ -969,11 +972,12 @@ CREATE VIEW x_target_rule_without_targets AS
     JOIN lane l ON l.lane = cl.lane AND l.decision_rule = 'target'
    WHERE NOT EXISTS (SELECT 1 FROM search_target t WHERE t.search_id = s.search_id);
 
--- @check a measured constant that was never calibrated -- its value would be a typed number
+-- @check a measured constant never calibrated while a lane in its scope has shipped -- its value would be a typed number
 -- @fix calibrate the constant from a calibrate run before a lane in its scope ships; a typed number is not a measurement
 CREATE VIEW x_measured_constant_never_calibrated AS
   SELECT c.name FROM constant c
    WHERE c.provenance = 'measured'
+     AND EXISTS (SELECT 1 FROM constant_scope cs JOIN shipped s ON s.lane = cs.lane WHERE cs.name = c.name)   -- the value is needed when the build order is rendered
      AND NOT EXISTS (SELECT 1 FROM constant_value v WHERE v.name = c.name);
 
 -- @check a target-bound lane's target that does not come from an acceptance viewing for that lane
@@ -1050,11 +1054,11 @@ CREATE VIEW x_timing_run_not_alone AS
     JOIN host ho ON ho.host = o.host AND ho.machine = ht.machine
    WHERE t.stage IN ('time','split','concurrency') AND t.state IN ('launched','running');
 
--- @check a run on a host that is blocked -- refused at the moment of use, with the fix
+-- @check an active run on a host that is blocked -- refused at the moment of use, with the fix; a host with finished runs stays blockable
 -- @fix unblock-host once the fix it names is done, or plan the run on another host
 CREATE VIEW x_run_on_a_blocked_host AS
   SELECT r.run_id, h.host, h.blocked FROM run r JOIN host h ON h.host = r.host
-   WHERE h.blocked IS NOT NULL AND r.state <> 'abandoned';
+   WHERE h.blocked IS NOT NULL AND r.state IN ('planned','launched','running');
 
 -- @check a score run on a host with no scorer row -- the plan could not say what to score with
 -- @fix add-scorer for the host, or score on a host that has one
