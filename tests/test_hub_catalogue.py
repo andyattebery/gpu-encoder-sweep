@@ -192,6 +192,89 @@ class Catalogue(unittest.TestCase):
         self.ok("add-constant", {"name": "X", "unit": "u", "provenance": "measured"})
         self.refused("scope-constant", {"name": "X", "lanes": ["m4-ipad-le1080p-sdr"]}, "x_measured_constant_never_calibrated: ")
 
+    # ---- add-ladder
+    def test_add_ladder_writes_the_rungs(self):
+        empty = Store()
+        self.addCleanup(empty.close)
+        client = client_for(empty)
+        self.assertEqual(post(client, "/catalogue/add-ladder", {"ladder_id": "av1", "codec": "av1", "rungs": [20, 15, 24]})[0], 200)
+        self.assertEqual([r["rung"] for r in empty.rows("ladder_rung")], [15, 20, 24])
+
+    def test_second_ladder_for_a_codec_is_refused(self):
+        self.refused("add-ladder", {"ladder_id": "av1-b", "codec": "av1", "rungs": [15]}, "ladder already has a row with that codec",
+                     refusals.UNIQUE_FIXES["ladder"])
+
+    # ---- author-chain
+    CHAIN = {"lane": "m4-ipad-gt1080p-hdr", "host": "media-01", "encoder_unit_id": A4000, "vf_template": "hwupload_cuda,scale_cuda=..."}
+
+    def test_author_chain_writes_the_row(self):
+        self.ok("author-chain", self.CHAIN)
+        self.assertEqual(len(self.rows("chain", lane="m4-ipad-gt1080p-hdr")), 1)
+
+    def test_author_chain_for_a_unit_not_on_the_host_is_refused(self):
+        self.refused("author-chain", dict(self.CHAIN, host="eta"), f"host_unit host='eta', encoder_unit_id='{A4000}' does not exist",
+                     "add it first with add-unit")
+
+    def test_author_chain_twice_is_refused(self):
+        body = {"lane": "m4-ipad-le1080p-sdr", "host": "media-01", "encoder_unit_id": B580, "vf_template": "null"}
+        self.refused("author-chain", body, "chain already has a row with that lane, host, encoder_unit_id", refusals.UNIQUE_FIXES["chain"])
+
+    # ---- add-scorer
+    SCORER = {"host": "eta-wsl", "ffvship": ["/usr/local/bin/FFVship"], "score_ffmpeg": ["/usr/lib/jellyfin-ffmpeg/ffmpeg", "-hide_banner"],
+              "metric_backend": "libvmaf_cuda", "gpu_id": 0, "cache_dir": "/home/sweep/cache"}
+
+    def test_add_scorer_writes_compact_argv(self):
+        self.ok("add-scorer", self.SCORER)
+        (row,) = self.rows("scorer", host="eta-wsl")
+        self.assertEqual(row["ffvship"], '["/usr/local/bin/FFVship"]')
+        self.assertEqual(json.loads(row["score_ffmpeg"]), self.SCORER["score_ffmpeg"])
+
+    def test_add_scorer_unknown_backend_is_refused(self):
+        self.refused("add-scorer", dict(self.SCORER, metric_backend="vmaf"), "metric_backend must be one of libvmaf, libvmaf_cuda")
+
+    def test_add_scorer_on_unknown_host_is_refused(self):
+        self.refused("add-scorer", dict(self.SCORER, host="nope"), "host host='nope' does not exist")
+
+    def test_add_scorer_twice_is_refused(self):
+        self.refused("add-scorer", dict(self.SCORER, host="media-01-score"), "scorer already has a row with that host")
+
+    # ---- set-floor
+    def test_set_floor_writes_a_floor_the_measured_rate_meets(self):
+        self.ok("set-floor", {"lane": "m4-ipad-le1080p-sdr", "min_content_rate": 20.0})
+        self.assertEqual(self.rows("lane", lane="m4-ipad-le1080p-sdr")[0]["min_content_rate"], 20.0)
+
+    def test_set_floor_above_the_measured_rate_is_refused(self):
+        text = self.refused("set-floor", {"lane": "m4-ipad-le1080p-sdr", "min_content_rate": 100.0}, "content_rate_meets_floor: ")
+        self.assertIn("under the floor", text)
+
+    def test_set_floor_on_an_unmeasured_lane_is_refused(self):
+        text = self.refused("set-floor", {"lane": "m4-ipad-gt1080p-sdr", "min_content_rate": 1.0}, "content_rate_meets_floor: ")
+        self.assertIn("UNMEASURED", text)
+
+    def test_set_floor_to_null_reports_only(self):
+        self.ok("set-floor", {"lane": "m4-ipad-gt1080p-sdr", "min_content_rate": None})
+
+    # ---- block-host, unblock-host
+    def test_block_host_writes_the_fix(self):
+        self.ok("block-host", {"host": "eta", "fix": "reseat the card; the driver lost it"})
+        self.assertEqual(self.rows("host", host="eta")[0]["blocked"], "reseat the card; the driver lost it")
+
+    def test_block_host_without_a_fix_is_refused(self):
+        self.refused("block-host", {"host": "eta", "fix": "  "}, "block-host without the fix")
+
+    def test_block_host_with_an_active_run_is_refused(self):
+        self.store.conn.executescript("UPDATE run SET state = 'running' WHERE run_id = 'b580-qsv-av1-screen'; "
+                                      "INSERT INTO run_event VALUES ('b580-qsv-av1-screen', '2026-09-09', 'running', 'resumed', 'agent')")
+        self.refused("block-host", {"host": "media-01", "fix": "the fix"}, "x_run_on_a_blocked_host: ",
+                     self.store.checks["x_run_on_a_blocked_host"]["fix"])
+
+    def test_unblock_host_clears_the_fix(self):
+        self.ok("unblock-host", {"host": "htpc-01"})
+        self.assertIsNone(self.rows("host", host="htpc-01")[0]["blocked"])
+
+    def test_unblock_unknown_host_is_refused(self):
+        self.refused("unblock-host", {"host": "nope"}, "host host='nope' does not exist")
+
 
 if __name__ == "__main__":
     unittest.main()

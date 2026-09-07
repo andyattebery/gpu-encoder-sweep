@@ -1,4 +1,6 @@
 """sweep/hub/api/catalogue.py -- the catalogue verbs: one POST per FILE table group, each one checked transaction."""
+import json
+
 from fastapi import APIRouter, Depends
 
 from sweep.hub import store as st
@@ -176,4 +178,101 @@ def scope_constant(body: ScopeConstant, store=Depends(get_store)):
         for lane in body.lanes:
             st.require(conn, "lane", lane=lane)
             st.insert(conn, "constant_scope", {"name": body.name, "lane": lane})
+    return OK
+
+
+class AddLadder(Body):
+    ladder_id: str
+    codec: str
+    rungs: list[int]
+
+
+@router.post("/add-ladder")
+def add_ladder(body: AddLadder, store=Depends(get_store)):
+    """One ladder per codec, never per host; the rungs a shipped anchor may take."""
+    with store.transaction() as conn:
+        st.insert(conn, "ladder", {"ladder_id": body.ladder_id, "codec": body.codec})
+        for rung in body.rungs:
+            st.insert(conn, "ladder_rung", {"ladder_id": body.ladder_id, "rung": rung})
+    return OK
+
+
+class AuthorChain(Body):
+    lane: str
+    host: str
+    encoder_unit_id: str
+    vf_template: str
+    notes_ref: str | None = None
+
+
+@router.post("/author-chain")
+def author_chain(body: AuthorChain, store=Depends(get_store)):
+    """The production filter graph per (lane, host, unit), authored before the sample."""
+    with store.transaction() as conn:
+        st.require(conn, "lane", lane=body.lane)
+        st.require(conn, "host", host=body.host)
+        st.require(conn, "host_unit", host=body.host, encoder_unit_id=body.encoder_unit_id)
+        st.insert(conn, "chain", body.model_dump())
+    return OK
+
+
+class AddScorer(Body):
+    host: str
+    ffvship: list[str]            # argv
+    score_ffmpeg: list[str]       # argv
+    metric_backend: str
+    gpu_id: int
+    cache_dir: str
+
+
+@router.post("/add-scorer")
+def add_scorer(body: AddScorer, store=Depends(get_store)):
+    """The intent of scoring on a host; the argv are stored as compact JSON."""
+    with store.transaction() as conn:
+        st.require(conn, "host", host=body.host)
+        st.insert(conn, "scorer", {"host": body.host, "ffvship": json.dumps(body.ffvship, separators=(",", ":")),
+                                   "score_ffmpeg": json.dumps(body.score_ffmpeg, separators=(",", ":")),
+                                   "metric_backend": body.metric_backend, "gpu_id": body.gpu_id, "cache_dir": body.cache_dir})
+    return OK
+
+
+class SetFloor(Body):
+    lane: str
+    min_content_rate: float | None = None
+
+
+@router.post("/set-floor")
+def set_floor(body: SetFloor, store=Depends(get_store)):
+    """The throughput floor a host must reach for the lane; NULL reports only. The shipped rate must meet it, measured."""
+    with store.transaction() as conn:
+        st.require(conn, "lane", lane=body.lane)
+        conn.execute("UPDATE lane SET min_content_rate = ? WHERE lane = ?", (body.min_content_rate, body.lane))
+    return OK
+
+
+class BlockHost(Body):
+    host: str
+    fix: str
+
+
+@router.post("/block-host")
+def block_host(body: BlockHost, store=Depends(get_store)):
+    """A host is blocked with THE FIX; a run on it is refused at the moment of use, quoting it."""
+    if not body.fix.strip():
+        raise Refusal("block-host without the fix", "give --fix: what must be done before the host is usable; the refusal at the moment of use quotes it")
+    with store.transaction() as conn:
+        st.require(conn, "host", host=body.host)
+        conn.execute("UPDATE host SET blocked = ? WHERE host = ?", (body.fix, body.host))
+    return OK
+
+
+class UnblockHost(Body):
+    host: str
+
+
+@router.post("/unblock-host")
+def unblock_host(body: UnblockHost, store=Depends(get_store)):
+    with store.transaction() as conn:
+        st.require(conn, "host", host=body.host)
+        conn.execute("UPDATE host SET blocked = NULL WHERE host = ?", (body.host,))
     return OK
