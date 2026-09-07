@@ -15,5 +15,7 @@ a transcode flow runs.
     uv sync --locked --extra hub --extra cli    # the locked environment: uv.lock and .python-version are the one pin
     uv run make check                           # the tests, the model proof (every check fires on its negative case), the docs current
 
-Status: M0 — the schema, its proof and the docs are here; the hub, the agents and the images follow.
+Status: M1 — the schema, its proof, the hub (every authoring verb, ingest, the queue's contract, export)
+and the CLI are here, proven by the fixture replayed through the API; the agents, the Redis queue and
+the images (M2) follow.
 The images vendor jellyfin-ffmpeg (GPL) and FFVship, which keep their own licences.

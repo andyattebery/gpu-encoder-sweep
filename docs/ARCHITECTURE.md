@@ -61,7 +61,7 @@ on every run is that sha.
 
 ### Schema changes the architecture requires
 
-Each lands with fixture rows, a mutation case and a DDL refusal.
+Landed in M1 (the legacy row is M3's), each with fixture rows, a mutation case and a DDL refusal.
 
 | change | why |
 |---|---|
@@ -92,7 +92,8 @@ contract, exported to `record/openapi.json`.
 `local_view`) · `add-unit` (encoder_unit + its `host_unit`: `--host --device` by PCI path; a render
 node is refused by the DDL) · `add-concept` · `add-setting` (+ enum values, roles, per-unit scope) ·
 `add-lane` (+ steps) · `add-constant` (a `measured` constant takes no value; `policy` needs
-`--reason`; `--scope` names the lanes it admits) · `add-ladder` (+ rungs) · `author-chain`
+`--reason`) · `scope-constant` (the lanes a constant admits — a verb of its own, because CEILING must
+exist before the lanes that cite it and its scope names lanes) · `add-ladder` (+ rungs) · `author-chain`
 (`--lane --host --unit --vf-template`) · `add-scorer` (host, backend, GPU, cache dir, tool paths —
 intent; the build is never typed and never stored here: it is what the agent's `identify` reports
 on each run) · `set-floor` · `block-host --fix` / `unblock-host`. Every write to a FILE table is a
@@ -101,12 +102,13 @@ verb's endpoint; `lane`, `host` and `search` each have an add verb and update ve
 
 **Sample and decision**: `pin-window` (a pinned window with a cut is never re-scanned) ·
 `classify-cut --reason` (the `classified` `cut_check` row: the result is a row, the reason is
-authored) · `define-class` (refuses a stratum with no member) · `record-viewing` (refuses a
-discarded encode) · `author-search` (base arm; the coarse ladder for the locate pass; candidates
+authored) · `define-class` (refuses a stratum with no member) · `record-viewing` (`--viewed-on` names
+the device; refuses a discarded encode) · `author-search` (base arm; the coarse ladder for the locate pass; candidates
 only with a HONOURED verdict on a member; the incumbent pinned at `--anchor` and naming its
 acceptance viewing; targets naming theirs; the height a served lane's) · `set-shipping-arm` ·
-`exclude-route` · `ship` (every DDL check, `measured_config_was_measured`,
-`content_rate_meets_floor`, rung on the ladder, chain exists) · `calibrate --lane --title`
+`exclude-route` · `ship` (every step of one `(lane, host)` in one call, so routing is complete at every
+moment once a lane ships; every DDL check, `measured_config_was_measured`, `content_rate_meets_floor`,
+rung on the ladder, chain exists) · `calibrate --lane --title`
 (HEADROOM's full-length encode) / `--from-run` (RUNG_FACTOR, BOUND, HOST_THRESHOLD; no value flag).
 
 **Mechanical** (plan → enqueue → wait → ingest, all inside the hub; the count is `len(cells)`):
@@ -223,9 +225,10 @@ arrays uploaded separately and kept by the hub beside the store, outside the exp
 
 | file | responsibility |
 |---|---|
-| `sweep/hub/app.py` | the FastAPI app factory: routers, the bearer-token dependency, store and queue wired per process |
+| `sweep/hub/app.py` | the FastAPI app factory: routers, the bearer-token middleware, the two handlers that make a refusal a 422 plain-text `REFUSING` body, store and queue wired per process |
+| `sweep/hub/refusals.py` | the one form, composed from the schema: the named constraints' fixes, SQLite's enum, NOT NULL, UNIQUE, foreign-key and STRICT messages read into it, a firing check with its `-- @fix` |
 | `sweep/hub/api/{catalogue,sample,search,decision,runs,agents,analysis,record}.py` | one router per verb group; typed bodies; every write in a transaction that runs the checks |
-| `sweep/hub/store.py` | SQLite from `sweep/schema.sql` (WAL, one writer); `check` via `model_check.run_checks`; read helpers; id allocation |
+| `sweep/hub/store.py` | SQLite from `sweep/schema.sql` (WAL, one writer, the schema pinned by `user_version`); every write one transaction that runs `model_check.run_checks`; `require`, `insert`, `RETURNING` ids, `plan_run`, `post_event`, `calibrate` |
 | `sweep/hub/ingest.py` | a posted record → rows |
 | `sweep/recipes.py` | pure functions named by recipe: `G1 panel`, `K1 cell_key`, `V1 verdict`, `T1 spread/nstar`, `R1 beats`, `nearest_rank`, `bd_rate` (ported from `analyze.py:140`); shared by hub and node |
 | `sweep/hub/build.py` | the one command builder: encode argv per frontend (from `sweep.py:690 build_encode_args`), production argv from `chain.vf_template`, legs as prefix truncation, cut/probe/rescale/FFVship/libvmaf argv |
@@ -235,7 +238,7 @@ arrays uploaded separately and kept by the hub beside the store, outside the exp
 | `sweep/hub/artifact.py` | records the artifact each agent reports (image digest, or package version and sha) and pins it into plans |
 | `sweep/hub/analysis.py` | rank (per window `bd_rate` over the shared range → median, k of n, per stratum), categorise (per decode path, UNMEASURED), invert on `lane.decision_rule` (tightest straddling pair, from `analyze.py:324`), content rate, screen and admissibility verdicts, `derive_ladders` (from `settings_search.py:299 locate_ladders`), calibrate (BOUND from `m4_routing.py:57-102`), equivalence, the comparison primitive |
 | `sweep/hub/render.py`, `sweep/hub/legacy.py`, `sweep/hub/export.py` | E1; `import-legacy` and `compare-legacy` (the campaign repo's committed CSVs, uploaded by the CLI); the deterministic export |
-| `sweep/cli/__main__.py` | `sweep`: one subparser per verb, `httpx` to the hub, prints replies, exits 1 on `REFUSING`; `export`, `render` write into the campaign repo; run as `uvx --from git+…@<tag> sweep` or `uv tool install` |
+| `sweep/cli/__init__.py` | `sweep`: one subparser per verb (the verb table proven equal to the OpenAPI document, field by field), `httpx` to the hub, prints replies, exits 1 on `REFUSING` and 2 when the hub is unreachable; `export`, `render` write into the campaign repo; run as `uvx --from git+…@<tag> sweep` or `uv tool install` |
 | `sweep/node/{agent,ffm,scoring,timing,pool,records}.py` | above; the same package in both node images and, via `uvx`, natively on eta |
 | `sweep/schema.sql`, `sweep/model_check.py` | unchanged in role: the schema is the source, the proof and the doc rendering stay |
 | `docker/Dockerfile.hub`, `docker/Dockerfile.node-encode`, `docker/Dockerfile.node-score` | the images above; `uv.lock` is the only place third-party packages are pinned, and every image installs from it |
@@ -345,16 +348,20 @@ itself makes impossible.
 
 ### Testing
 
-`make check` is the gate: the named unittest modules, `sweep/model_check.py --mutate` (every check
-fires on its negative case) and `--check` (the rendered regions of `DATA-MODEL.md` are current).
-Modules are named, never discovered. Above that:
+`uv run make check` is the gate, after `uv sync --locked --extra hub --extra cli`: the named unittest
+modules, `sweep/model_check.py --mutate` (every check fires on its negative case) and `--check` (the
+rendered regions of `DATA-MODEL.md` are current). Modules are named, never discovered. Above that:
 
 - **Hub tests run in-process** under the FastAPI test client with `FakeQueue` and a temporary store,
   so every verb, every refusal and every ingest path is covered without a container.
 - **Every refusal has a test that names it**, and `test_refusals.py` asserts coverage against
   `refusals.json`: every `by_construction` id appears in the table above, every `check` id maps to an
-  `x_*` view or a script check the model proves, and no request body outside the catalogue router
-  carries a `count`, `device`, `height`, `directory` or `root` field in the OpenAPI document.
+  `x_*` view or a script check the model proves, no request body outside the catalogue router
+  carries a `count`, `device`, `height`, `directory` or `root` field in the OpenAPI document, and
+  `REFUSING:` is spelled in one place in the code — everything else composes through it.
+- **The replay is the acceptance of the hub itself**: `test_hub_replay.py` builds the proof's fixture
+  through the API and the ingest path in the campaign's order (86 steps), with no check firing at any
+  step and the authored tables equal to the fixture's row for row; a re-export is an empty diff.
 - **The integration suite** exercises `RedisQueue`, the agent protocol and the exchange against a
   Redis service container — in CI on every push, locally under `make integration` with Docker.
 - **Mutation checking**: a suite that cannot fail on a deliberate break is not evidence.
