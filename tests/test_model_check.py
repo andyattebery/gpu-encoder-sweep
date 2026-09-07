@@ -150,6 +150,26 @@ class EveryCheckFires(unittest.TestCase):
         self.assertEqual({k: v for k, v in mc.run_checks(conn, tags).items() if v}, {})
 
 
+class RefusalsAreInTheForm(unittest.TestCase):
+    FORM = r"^REFUSING: .+ -- .+$"
+
+    def test_refusals_are_in_the_form(self):
+        # every refusal the proof itself raises is `REFUSING: <what> -- <fix>`, like the store's
+        self.assertRegex(mc.refusing("a thing", "do this"), self.FORM)
+        self.assertEqual(mc.refusing("a thing", "do this"), "REFUSING: a thing -- do this")
+        self.assertRegex(mc.tags_refusal(["t: missing @group/@class/@writer"]), self.FORM)
+        self.assertRegex(mc.markers_refusal(["checks"]), self.FORM)
+        self.assertRegex(mc.stale_refusal(["checks", "writers"]), self.FORM)
+        saved = mc.MIN_SQLITE
+        mc.MIN_SQLITE = (99, 0, 0)
+        try:
+            with self.assertRaises(SystemExit) as cm:
+                mc.load_schema()
+        finally:
+            mc.MIN_SQLITE = saved
+        self.assertRegex(str(cm.exception), self.FORM)
+
+
 class DocIsRendered(unittest.TestCase):
     def test_generated_regions_are_current(self):
         conn = mc.load_schema()

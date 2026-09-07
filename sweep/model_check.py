@@ -11,7 +11,8 @@ The schema is the source. Nothing here reads the doc's schema blocks as truth; i
 
 REFUSES: a schema SQLite cannot load · a table without all three tags · a FILE table whose writer
 is not a person (`authored`, `ship` or `viewing`) · a table with no writer or two · a check that never fires on its negative case
-· a stale rendered region under --check. Tests: python3 -m unittest tests.test_model_check
+· a stale rendered region under --check. Every refusal reads `REFUSING: <what> -- <fix>`, the store's form.
+Tests: python3 -m unittest tests.test_model_check
 """
 import argparse
 import re
@@ -32,12 +33,32 @@ BEGIN = "<!-- BEGIN GENERATED: {} -->"
 END = "<!-- END GENERATED: {} -->"
 
 
+# ---------------------------------------------------------------- refusals: one form
+
+def refusing(what, fix):
+    """The one form every refusal takes, here and in the hub: what was refused, then the fix."""
+    return f"REFUSING: {what} -- {fix}"
+
+
+def tags_refusal(problems):
+    return refusing("tags: " + "; ".join(problems), "tag every table in sweep/schema.sql with @group, @class and @writer, one writer each")
+
+
+def markers_refusal(missing):
+    return refusing("DATA-MODEL.md lacks the marker pair for: " + ", ".join(missing),
+                    "restore <!-- BEGIN GENERATED: name --> and its END around each region")
+
+
+def stale_refusal(stale):
+    return refusing("DATA-MODEL.md regions are stale: " + ", ".join(stale), "run python3 sweep/model_check.py --render")
+
+
 # ---------------------------------------------------------------- load
 
 def load_schema():
     if sqlite3.sqlite_version_info < MIN_SQLITE:
-        raise SystemExit(f"REFUSING: sqlite {sqlite3.sqlite_version} < {'.'.join(map(str, MIN_SQLITE))}; "
-                         "STRICT tables need 3.37")
+        raise SystemExit(refusing(f"sqlite {sqlite3.sqlite_version} is older than {'.'.join(map(str, MIN_SQLITE))}",
+                                  "STRICT tables need 3.37; run under a python whose sqlite3 is at least that"))
     conn = sqlite3.connect(":memory:")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA.read_text())
@@ -1090,7 +1111,7 @@ def main(argv=None):
     tags, checks = parse_tags()
     tag_problems = check_tags(conn, tags)
     if tag_problems:
-        print("REFUSING: tags\n  " + "\n  ".join(tag_problems))
+        print(tags_refusal(tag_problems))
         return 1
 
     if args.render or args.check:
@@ -1098,11 +1119,11 @@ def main(argv=None):
         text = DOC.read_text()
         new, missing, stale = apply_regions(text, regions)
         if missing:
-            print("REFUSING: DATA-MODEL.md lacks markers for: " + ", ".join(missing))
+            print(markers_refusal(missing))
             return 1
         if args.check:
             if stale:
-                print("STALE regions in DATA-MODEL.md: " + ", ".join(stale) + " -- run --render")
+                print(stale_refusal(stale))
                 return 1
             print("DATA-MODEL.md generated regions: current")
             return 0
