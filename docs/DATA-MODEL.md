@@ -525,7 +525,7 @@ flag, and `cell_setting` is what it became.
 <!-- BEGIN GENERATED: schema:measurement -->
     run                    run_id · encoder_unit_id · content_class_id · search_id · host
                            · node_label
-                           · stage ∈ {screen, locate, encode, time, split, concurrency, viewing, probe, calibrate}
+                           · stage ∈ {inventory, materialise, verify, screen, locate, encode, score, time, split, concurrency, viewing, probe, calibrate}
                            · artifact · ffmpeg_build · ffmpeg_sha · scorer_build
                            · ffvship_version · metric_backend · harness_version · started_at
                            · finished_at
@@ -904,7 +904,7 @@ erDiagram
         TEXT search_id FK
         TEXT host FK
         TEXT node_label
-        TEXT stage "screen | locate | encode | time | split | concurrency | viewing | probe | calibrate"
+        TEXT stage "inventory | materialise | verify | screen | locate | encode | score | time | split | concurrency | viewing | probe | calibrate"
         TEXT artifact
         TEXT ffmpeg_build
         TEXT ffmpeg_sha
@@ -1495,5 +1495,5 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 | `content_rate_meets_floor` (script) | content minutes per wall minute per (lane, host) at the shipped setting and worker count meets the lane's floor; a floor with no timing behind it is UNMEASURED, not unchanged | time the shipped setting on that (lane, host) at that worker count; a rate under the floor ships elsewhere, or the floor changes with set-floor |
 | `tags_complete` (script) | every table carries @group, @class and @writer; FILE means a person wrote it; one writer per table | tag the table in sweep/schema.sql with @group, @class and @writer |
 
-**Enforced by the DDL itself, so no view is needed:** a score row always names its height; a timing row always names its decode path and worker count · a shipped row's (lane, step) is one of the lane's steps · `measured` needs an evidence class; `policy` needs a reason; a `classified` cut check needs a reason · a derived constant carries its inputs and its precision; a policy constant carries its value and its reason; a measured one has no typed value · an incumbent arm is pinned at its anchor; the base and the candidates are not · a score target and its height are set together or not at all; a cap that binds names its constant · one ladder per codec; a reference cut names the chain that built it.
+**Enforced by the DDL itself, so no view is needed:** a score row always names its height; a timing row always names its decode path and worker count · a shipped row's (lane, step) is one of the lane's steps · `measured` needs an evidence class; `policy` needs a reason; a `classified` cut check needs a reason · a derived constant carries its inputs and its precision; a policy constant carries its value and its reason; a measured one has no typed value · an incumbent arm is pinned at its anchor; the base and the candidates are not · a score target and its height are set together or not at all; a cap that binds names its constant · one ladder per codec; a reference cut names the chain that built it · an inventory or verify run names no unit; every other stage names one.
 <!-- END GENERATED: checks -->

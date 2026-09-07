@@ -309,6 +309,9 @@ INSERT INTO search_target VALUES ('b580-qsv-av1','ssimulacra2','mean',75,NULL),(
 -- every run names the artifact its plan was built for; the fixture's is one image digest
 INSERT INTO run (run_id, encoder_unit_id, content_class_id, search_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha,
                  scorer_build, ffvship_version, metric_backend, harness_version, started_at, finished_at) VALUES
+ ('b580-inventory',NULL,NULL,NULL,'media-01','media-01','inventory','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-24T09:00','2026-08-24T09:20'),
+ ('b580-materialise','intel-b580-ihd26.2.2-qsv-av1',NULL,NULL,'media-01','media-01-b580','materialise','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-25T09:00','2026-08-25T11:00'),
+ ('b580-verify',NULL,NULL,NULL,'media-01','media-01','verify','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-26T09:00','2026-08-26T09:30'),
  ('b580-qsv-av1','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','encode','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d','ffvship 1.3','1.3','libvmaf_cuda','g0',"2026-09-02T10:00",'2026-09-03T02:00'),
  ('b580-qsv-av1-time','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','time','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-03T10:00','2026-09-03T12:00'),
  ('b580-qsv-av1-screen','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr',NULL,'media-01','media-01-b580','screen','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-01T10:00','2026-09-01T11:03'),
@@ -324,6 +327,7 @@ UPDATE run SET state = 'complete', fetched_at = finished_at, verified_at = finis
 INSERT INTO run_event SELECT run_id, started_at, 'launched', 'claimed; the agent reports the artifact the plan names', 'hub' FROM run;
 INSERT INTO run_event SELECT run_id, started_at || ':30', 'running', 'first cell started', 'agent' FROM run;
 INSERT INTO run_event SELECT run_id, finished_at, 'complete', 'count and heights verified against the plan', 'hub' FROM run;
+INSERT INTO run_window SELECT 'b580-materialise', window_id FROM window;   -- the reference set is built over every window
 INSERT INTO run_window SELECT 'b580-qsv-av1', window_id FROM content_class_member WHERE content_class_id = 'native-1080p-sdr';
 INSERT INTO run_window SELECT 'b580-qsv-av1-time', window_id FROM content_class_member WHERE content_class_id = 'native-1080p-sdr';
 INSERT INTO run_window VALUES ('b580-qsv-av1-screen','tng');
@@ -499,6 +503,7 @@ DDL_ENFORCED = [
     "an incumbent arm is pinned at its anchor; the base and the candidates are not",
     "a score target and its height are set together or not at all; a cap that binds names its constant",
     "one ladder per codec; a reference cut names the chain that built it",
+    "an inventory or verify run names no unit; every other stage names one",
 ]
 
 
@@ -843,6 +848,12 @@ DDL_REFUSALS = [
      "VALUES ('r', 'intel-b580-ihd26.2.2-qsv-av1', 'media-01', 'media-01-b580', 'probe', 'b', 's', 'g0', '2026-09-05')"),
     ("a chain for a unit not on that host", "INSERT INTO chain VALUES ('m4-ipad-gt1080p-hdr','media-01','nvidia-5060ti-595-nvenc-av1','null',NULL)"),
     ("a reference cut naming a chain without its unit", "UPDATE cut SET chain_unit = NULL WHERE cut_id = 'tng.ref'"),
+    ("an encode run with no unit",
+     "INSERT INTO run (run_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha, harness_version, started_at) "
+     "VALUES ('r', 'media-01', 'media-01-b580', 'encode', 'a', 'b', 's', 'g0', '2026-09-05')"),
+    ("an inventory run naming a unit",
+     "INSERT INTO run (run_id, encoder_unit_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha, harness_version, started_at) "
+     "VALUES ('r', 'intel-b580-ihd26.2.2-qsv-av1', 'media-01', 'media-01-b580', 'inventory', 'a', 'b', 's', 'g0', '2026-09-05')"),
     ("an event by nobody", "INSERT INTO run_event (run_id, at, state) VALUES ('b580-qsv-av1', '2026-09-03T03:00', 'running')"),
 ]
 

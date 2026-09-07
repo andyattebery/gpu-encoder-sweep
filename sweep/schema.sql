@@ -342,12 +342,12 @@ CREATE TABLE cut_check (                                    -- a content check, 
 -- @writer orchestrate
 CREATE TABLE run (                                          -- one invocation
   run_id           TEXT PRIMARY KEY,
-  encoder_unit_id  TEXT NOT NULL REFERENCES encoder_unit,
-  content_class_id TEXT REFERENCES content_class,           -- NULL only for a library-title run (the pre-pass probe)
+  encoder_unit_id  TEXT REFERENCES encoder_unit,            -- NULL only for a unit-less stage: inventory, verify
+  content_class_id TEXT REFERENCES content_class,           -- NULL for inventory, materialise, verify and the probe (a library-title run)
   search_id        TEXT REFERENCES search,                  -- the spec this run executes; NULL for screen, viewing, probe, calibrate
   host             TEXT NOT NULL REFERENCES host,           -- where it RAN; not part of the measurement key
   node_label       TEXT NOT NULL,                           -- a distinct ledger identity per card in a multi-card box
-  stage            TEXT NOT NULL CHECK (stage IN ('screen','locate','encode','time','split','concurrency','viewing','probe','calibrate')),
+  stage            TEXT NOT NULL CHECK (stage IN ('inventory','materialise','verify','screen','locate','encode','score','time','split','concurrency','viewing','probe','calibrate')),
   artifact         TEXT NOT NULL,                           -- what the plan was built for: the image digest, or the package version and sha; the agent reports it
   ffmpeg_build     TEXT NOT NULL,
   ffmpeg_sha       TEXT NOT NULL,
@@ -360,7 +360,8 @@ CREATE TABLE run (                                          -- one invocation
   state            TEXT NOT NULL DEFAULT 'planned' CHECK (state IN ('planned','launched','running','complete','failed','abandoned')),
   fetched_at       TEXT,                                    -- when the product reached the store
   verified_at      TEXT,                                    -- when count and heights were checked against the plan
-  CHECK (state <> 'complete' OR verified_at IS NOT NULL)
+  CHECK (state <> 'complete' OR verified_at IS NOT NULL),
+  CONSTRAINT run_unit_by_stage CHECK ((stage IN ('inventory','verify')) = (encoder_unit_id IS NULL))   -- a scan and a content check use no encoder; every other stage names one
 ) STRICT;
 
 -- @group measurement
@@ -999,7 +1000,8 @@ CREATE VIEW x_run_on_a_blocked_host AS
 -- @fix plan the run on a host that has the unit (add-unit puts a unit on a host)
 CREATE VIEW x_run_unit_not_on_host AS
   SELECT r.run_id, r.host, r.encoder_unit_id FROM run r
-   WHERE NOT EXISTS (SELECT 1 FROM host_unit hu WHERE hu.host = r.host AND hu.encoder_unit_id = r.encoder_unit_id);
+   WHERE r.encoder_unit_id IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM host_unit hu WHERE hu.host = r.host AND hu.encoder_unit_id = r.encoder_unit_id);
 
 -- @check a screen verdict with no encodes behind it -- a probe that did not run is not evidence
 -- @fix the screen posts a verdict with the cells it summarises; re-run the probe
