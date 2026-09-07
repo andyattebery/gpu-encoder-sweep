@@ -65,6 +65,15 @@ class FixtureIsClean(unittest.TestCase):
         self.assertEqual(rows["qsv.b_strategy"], "HONOURED")        # one window is enough
         self.assertEqual(rows["qsv.adaptive_b"], "INCOMPLETE 1 of 6")  # one window cannot exclude
 
+    def test_run_progress_of_a_score_run_reads_its_parents_cells(self):
+        conn = mc.load_schema()
+        self.addCleanup(conn.close)
+        mc.load_fixture(conn)
+        rows = {r[0]: r for r in conn.execute(
+            "SELECT run_id, planned_total, still_planned, encoded, scored, failed FROM v_run_progress")}
+        self.assertEqual(rows["b580-qsv-av1"][1:], (89, 0, 0, 88, 1))          # the encode run: its own cells, one failed
+        self.assertEqual(rows["b580-qsv-av1-score"][1:], (89, 0, 0, 89, 1))    # the score run: the parent's cells, scored by THIS run
+
     def test_representation_is_counted(self):
         conn = mc.load_schema()
         self.addCleanup(conn.close)

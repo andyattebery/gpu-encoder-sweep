@@ -434,7 +434,8 @@ deletes the encode**, because the store holds scores, not encodes.
 
 **Reads.** `cell` and its kept `encode` · the reference cut, content hash checked · `search.score_height`
 · the scorer build and metric backend, which are in the key.
-**Writes.** `score` (cell × height × metric × statistic) · `step_trace` · `encode.kept = 0`.
+**Writes.** `score` (score run × cell × height × metric × statistic) · `step_trace` · `encode.kept = 0` — under a
+score run of its own, planned from the encoding run whose cells it scores.
 **Decides.** Nothing. The height was decided in Stage 2; the metric set is fixed and none is
 dropped — `libvmaf` is 47% of the scoring CPU and exists to produce numbers Stage 8 must at least
 report.
@@ -734,7 +735,7 @@ VMAF practice.*
    are read and not stored — `score.statistic` holds `mean`, `p5`, `min` and `max`, nothing else.
    The thread count is a speed lever measured bit-identical from 0 to 32.
 4. **Stored:** `ssimulacra2` mean · p5 · min; `butteraugli` max (infnorm); `vmaf`, `cambi`, `psnr_y`,
-   `float_ssim` mean; each row with `height`, `recipe = S1` and `scorer_build` (FFVship version, ffmpeg
+   `float_ssim` mean; each row with its score run, `height`, `recipe = S1` and `scorer_build` (FFVship version, ffmpeg
    build sha). **Deterministic:** FFVship is bit-deterministic on one GPU and libvmaf across thread
    counts, both measured, so the acceptance bar of "the same" is exact.
 

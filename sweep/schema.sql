@@ -345,6 +345,7 @@ CREATE TABLE run (                                          -- one invocation
   encoder_unit_id  TEXT REFERENCES encoder_unit,            -- NULL only for a unit-less stage: inventory, verify
   content_class_id TEXT REFERENCES content_class,           -- NULL for inventory, materialise, verify and the probe (a library-title run)
   search_id        TEXT REFERENCES search,                  -- the spec this run executes; NULL for screen, viewing, probe, calibrate
+  parent_run_id    TEXT REFERENCES run,                     -- a score run scores its parent's cells and has none of its own; NULL on every other stage
   host             TEXT NOT NULL REFERENCES host,           -- where it RAN; not part of the measurement key
   node_label       TEXT NOT NULL,                           -- a distinct ledger identity per card in a multi-card box
   stage            TEXT NOT NULL CHECK (stage IN ('inventory','materialise','verify','screen','locate','encode','score','time','split','concurrency','viewing','probe','calibrate')),
@@ -361,7 +362,8 @@ CREATE TABLE run (                                          -- one invocation
   fetched_at       TEXT,                                    -- when the product reached the store
   verified_at      TEXT,                                    -- when count and heights were checked against the plan
   CHECK (state <> 'complete' OR verified_at IS NOT NULL),
-  CONSTRAINT run_unit_by_stage CHECK ((stage IN ('inventory','verify')) = (encoder_unit_id IS NULL))   -- a scan and a content check use no encoder; every other stage names one
+  CONSTRAINT run_unit_by_stage CHECK ((stage IN ('inventory','verify')) = (encoder_unit_id IS NULL)),  -- a scan and a content check use no encoder; every other stage names one
+  CONSTRAINT run_score_has_parent CHECK ((stage = 'score') = (parent_run_id IS NOT NULL))               -- a score run scores a parent; nothing else has one
 ) STRICT;
 
 -- @group measurement
@@ -432,7 +434,8 @@ CREATE TABLE cell_failure (                                 -- a planned cell th
 -- @group measurement
 -- @class ROW
 -- @writer score
-CREATE TABLE score (                                        -- ONE-TO-MANY: height x metric x statistic
+CREATE TABLE score (                                        -- ONE-TO-MANY: height x metric x statistic, under the score run that produced it
+  run_id    TEXT NOT NULL REFERENCES run,                   -- the score run, never the cell's encode run
   cell_key  TEXT NOT NULL REFERENCES cell,
   height    INTEGER NOT NULL,                               -- a score without its height is not a number
   metric    TEXT NOT NULL CHECK (metric IN ('ssimulacra2','butteraugli','vmaf','cambi','psnr_y','float_ssim')),
@@ -440,7 +443,7 @@ CREATE TABLE score (                                        -- ONE-TO-MANY: heig
   value     REAL NOT NULL,
   recipe    TEXT NOT NULL,                                 -- the named scoring recipe (SPEC.md, S1): scaler, options, pooling
   scorer_build TEXT NOT NULL,                              -- the binaries: FFVship version and the ffmpeg build sha
-  PRIMARY KEY (cell_key, height, metric, statistic, recipe, scorer_build)
+  PRIMARY KEY (run_id, cell_key, height, metric, statistic, recipe, scorer_build)
 ) STRICT;
 
 -- @group measurement
@@ -462,7 +465,8 @@ CREATE TABLE timing (                                       -- ONE-TO-MANY: work
 -- @group measurement
 -- @class ROW
 -- @writer score
-CREATE TABLE step_trace (
+CREATE TABLE step_trace (                                   -- how long each scoring leg took, under the score run
+  run_id       TEXT NOT NULL REFERENCES run,
   cell_key     TEXT NOT NULL REFERENCES cell,
   height       INTEGER NOT NULL,
   scoring_step TEXT NOT NULL CHECK (scoring_step IN ('rescale_ref','rescale_enc','ssimu2','butteraugli','libvmaf')),
@@ -470,7 +474,7 @@ CREATE TABLE step_trace (
   cores_busy   REAL,
   gpu_mean     REAL,
   gpu_max      REAL,
-  PRIMARY KEY (cell_key, height, scoring_step)
+  PRIMARY KEY (run_id, cell_key, height, scoring_step)
 ) STRICT;
 
 -- @group measurement
@@ -709,16 +713,19 @@ CREATE VIEW v_cell_state AS
               ELSE 'planned' END AS state
     FROM cell c;
 
--- a run's progress: the plan is its cells, so the expected count is never typed
+-- a run's progress: the plan is its cells, so the expected count is never typed; a score run's cells are its parent's,
+-- and it has scored the ones that carry a score row under ITS run_id
 CREATE VIEW v_run_progress AS
   SELECT r.run_id, r.stage, r.state,
          count(cs.cell_key) AS planned_total,
          sum(cs.state = 'planned') AS still_planned,
          sum(cs.state = 'encoded') AS encoded,
-         sum(cs.state = 'scored') AS scored,
+         sum(CASE WHEN r.stage = 'score'
+                  THEN EXISTS (SELECT 1 FROM score sc WHERE sc.cell_key = cs.cell_key AND sc.run_id = r.run_id)
+                  ELSE cs.state = 'scored' END) AS scored,
          sum(cs.state = 'timed') AS timed,
          sum(cs.state = 'failed') AS failed
-    FROM run r LEFT JOIN v_cell_state cs ON cs.run_id = r.run_id
+    FROM run r LEFT JOIN v_cell_state cs ON cs.run_id = coalesce(r.parent_run_id, r.run_id)
    GROUP BY r.run_id;
 
 -- ============================================================================ CHECKS (x_*): each must return ZERO rows
@@ -996,11 +1003,11 @@ CREATE VIEW x_run_on_a_blocked_host AS
   SELECT r.run_id, h.host, h.blocked FROM run r JOIN host h ON h.host = r.host
    WHERE h.blocked IS NOT NULL AND r.state <> 'abandoned';
 
--- @check a run whose unit is not in the host it ran on
+-- @check a run whose unit is not in the host it ran on -- a score run is exempt: its unit is its parent's, and its host holds the scorer
 -- @fix plan the run on a host that has the unit (add-unit puts a unit on a host)
 CREATE VIEW x_run_unit_not_on_host AS
   SELECT r.run_id, r.host, r.encoder_unit_id FROM run r
-   WHERE r.encoder_unit_id IS NOT NULL
+   WHERE r.encoder_unit_id IS NOT NULL AND r.stage <> 'score'
      AND NOT EXISTS (SELECT 1 FROM host_unit hu WHERE hu.host = r.host AND hu.encoder_unit_id = r.encoder_unit_id);
 
 -- @check a screen verdict with no encodes behind it -- a probe that did not run is not evidence
@@ -1036,9 +1043,17 @@ CREATE VIEW x_search_height_not_a_lane_height AS
 -- @check a score at a height other than its search's -- rows carrying more than one height are refused
 -- @fix score at the search's height only; the height is decided once, in author-search
 CREATE VIEW x_score_at_another_height AS
-  SELECT sc.cell_key, sc.height, s.score_height FROM score sc
-    JOIN cell c ON c.cell_key = sc.cell_key JOIN run r ON r.run_id = c.run_id JOIN search s ON s.search_id = r.search_id
+  SELECT sc.run_id, sc.cell_key, sc.height, s.score_height FROM score sc
+    JOIN run r ON r.run_id = sc.run_id JOIN search s ON s.search_id = r.search_id
    WHERE sc.height <> s.score_height;
+
+-- @check a score run whose parent is not an encoding run of the same search and class
+-- @fix score runs are planned from an encode, screen, locate or viewing run of the same search and class; re-plan it from one
+CREATE VIEW x_score_run_without_parent AS
+  SELECT s.run_id, s.parent_run_id FROM run s
+   WHERE s.stage = 'score'
+     AND NOT EXISTS (SELECT 1 FROM run p WHERE p.run_id = s.parent_run_id AND p.stage IN ('encode','screen','locate','viewing')
+                      AND p.search_id IS s.search_id AND p.content_class_id IS s.content_class_id);
 
 -- @check a reference cut in use with no content check passed or classified -- a faithful copy of a broken cut passes every sha
 -- @fix verify the reference set to a passed content check, or classify-cut with the reason, before define-class uses the cut

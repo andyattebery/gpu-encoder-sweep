@@ -312,12 +312,16 @@ INSERT INTO run (run_id, encoder_unit_id, content_class_id, search_id, host, nod
  ('b580-inventory',NULL,NULL,NULL,'media-01','media-01','inventory','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-24T09:00','2026-08-24T09:20'),
  ('b580-materialise','intel-b580-ihd26.2.2-qsv-av1',NULL,NULL,'media-01','media-01-b580','materialise','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-25T09:00','2026-08-25T11:00'),
  ('b580-verify',NULL,NULL,NULL,'media-01','media-01','verify','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-26T09:00','2026-08-26T09:30'),
- ('b580-qsv-av1','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','encode','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d','ffvship 1.3','1.3','libvmaf_cuda','g0',"2026-09-02T10:00",'2026-09-03T02:00'),
+ ('b580-qsv-av1','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','encode','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-02T10:00','2026-09-03T02:00'),
  ('b580-qsv-av1-time','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','time','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-03T10:00','2026-09-03T12:00'),
  ('b580-qsv-av1-screen','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr',NULL,'media-01','media-01-b580','screen','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-01T10:00','2026-09-01T11:03'),
  ('b580-qsv-av1-locate','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','locate','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-02T00:00','2026-09-02T00:40'),
  ('b580-viewing','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr',NULL,'media-01','media-01-b580','viewing','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-04T10:00','2026-09-04T10:10'),
  ('m4-calibrate','nvidia-a4000-595-nvenc-hevc',NULL,NULL,'media-01','media-01','calibrate','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-28T10:00','2026-08-28T14:00');
+-- scoring is a run of its own: on the score container of the same machine, over the encode run's cells, with the scorer's identity
+INSERT INTO run (run_id, parent_run_id, encoder_unit_id, content_class_id, search_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha,
+                 scorer_build, ffvship_version, metric_backend, harness_version, started_at, finished_at) VALUES
+ ('b580-qsv-av1-score','b580-qsv-av1','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01-score','media-01-score','score','sweep-score@sha256:9f8e7d','8.1.2-Jellyfin','0b0ea2d','FFVship 1.3 + 8.1.2-0b0ea2d','1.3','libvmaf_cuda','g0','2026-09-03T02:30','2026-09-03T06:00');
 -- HEADROOM 0.98 is the fixture's stand-in: the incumbent request factor, which overshoots and is unmeasured
 INSERT INTO constant_value VALUES
  ('HEADROOM','m4-calibrate',0.98,'2026-08-28'),('BOUND','m4-calibrate',20,'2026-08-28'),
@@ -329,6 +333,7 @@ INSERT INTO run_event SELECT run_id, started_at || ':30', 'running', 'first cell
 INSERT INTO run_event SELECT run_id, finished_at, 'complete', 'count and heights verified against the plan', 'hub' FROM run;
 INSERT INTO run_window SELECT 'b580-materialise', window_id FROM window;   -- the reference set is built over every window
 INSERT INTO run_window SELECT 'b580-qsv-av1', window_id FROM content_class_member WHERE content_class_id = 'native-1080p-sdr';
+INSERT INTO run_window SELECT 'b580-qsv-av1-score', window_id FROM run_window WHERE run_id = 'b580-qsv-av1';   -- a score run copies its parent's
 INSERT INTO run_window SELECT 'b580-qsv-av1-time', window_id FROM content_class_member WHERE content_class_id = 'native-1080p-sdr';
 INSERT INTO run_window VALUES ('b580-qsv-av1-screen','tng');
 INSERT INTO run_window SELECT 'b580-qsv-av1-locate', window_id FROM content_class_member WHERE content_class_id = 'native-1080p-sdr';
@@ -375,16 +380,16 @@ INSERT INTO cell_setting SELECT cell_key, 'qsv.preset', '1', 'identity' FROM cel
 INSERT INTO cell_setting SELECT cell_key, 'qsv.b_strategy', '1', 'identity' FROM cell WHERE cell_key LIKE 'c-i30-%';
 INSERT INTO cell_setting SELECT cell_key, 'qsv.adaptive_b', '-1', 'default_resolved' FROM cell WHERE cell_key LIKE 'c-i30-%';
 INSERT INTO encode SELECT cell_key, 34000000, 17000.0, 1439, 60.0, 'hardware', 0 FROM cell WHERE cell_key LIKE 'c-i30-%';
-INSERT INTO score SELECT c.cell_key, 1548, 'ssimulacra2', 'mean', 95.0 - 0.5 * CAST(cs.value AS REAL), 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d'
+INSERT INTO score SELECT 'b580-qsv-av1-score', c.cell_key, 1548, 'ssimulacra2', 'mean', 95.0 - 0.5 * CAST(cs.value AS REAL), 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d'
   FROM cell c JOIN cell_setting cs ON cs.cell_key = c.cell_key AND cs.setting_id = 'qsv.q' WHERE c.run_id = 'b580-qsv-av1';
-INSERT INTO score SELECT c.cell_key, 1548, 'ssimulacra2', 'p5', 86.0 - 0.5 * CAST(cs.value AS REAL), 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d'
+INSERT INTO score SELECT 'b580-qsv-av1-score', c.cell_key, 1548, 'ssimulacra2', 'p5', 86.0 - 0.5 * CAST(cs.value AS REAL), 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d'
   FROM cell c JOIN cell_setting cs ON cs.cell_key = c.cell_key AND cs.setting_id = 'qsv.q' WHERE c.run_id = 'b580-qsv-av1';
-INSERT INTO score SELECT c.cell_key, 1548, 'ssimulacra2', 'min', 80.0 - 0.5 * CAST(cs.value AS REAL), 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d'
+INSERT INTO score SELECT 'b580-qsv-av1-score', c.cell_key, 1548, 'ssimulacra2', 'min', 80.0 - 0.5 * CAST(cs.value AS REAL), 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d'
   FROM cell c JOIN cell_setting cs ON cs.cell_key = c.cell_key AND cs.setting_id = 'qsv.q' WHERE c.run_id = 'b580-qsv-av1';
-INSERT INTO score SELECT cell_key, 1548, 'vmaf', 'mean', 96.0, 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d' FROM cell WHERE run_id = 'b580-qsv-av1';
-INSERT INTO score SELECT cell_key, 1548, 'cambi', 'mean', 0.4, 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d' FROM cell WHERE run_id = 'b580-qsv-av1';
-INSERT INTO score SELECT cell_key, 1548, 'butteraugli', 'max', 3.1, 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d' FROM cell WHERE run_id = 'b580-qsv-av1';
-INSERT INTO step_trace VALUES ('c-a24-tng',1548,'rescale_ref',20.1,2.0,0.0,0.0),('c-a24-tng',1548,'libvmaf',51.4,11.0,15.9,22.0);
+INSERT INTO score SELECT 'b580-qsv-av1-score', cell_key, 1548, 'vmaf', 'mean', 96.0, 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d' FROM cell WHERE run_id = 'b580-qsv-av1';
+INSERT INTO score SELECT 'b580-qsv-av1-score', cell_key, 1548, 'cambi', 'mean', 0.4, 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d' FROM cell WHERE run_id = 'b580-qsv-av1';
+INSERT INTO score SELECT 'b580-qsv-av1-score', cell_key, 1548, 'butteraugli', 'max', 3.1, 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d' FROM cell WHERE run_id = 'b580-qsv-av1';
+INSERT INTO step_trace VALUES ('b580-qsv-av1-score','c-a24-tng',1548,'rescale_ref',20.1,2.0,0.0,0.0),('b580-qsv-av1-score','c-a24-tng',1548,'libvmaf',51.4,11.0,15.9,22.0);
 
 -- timing on the SOURCE cut: two hardware windows and the VC-1 one on the software path
 INSERT INTO cell VALUES ('t-tng','b580-qsv-av1-time','tng','source'),('t-parks','b580-qsv-av1-time','parks','source'),('t-tos','b580-qsv-av1-time','tos','source');
@@ -496,7 +501,8 @@ SCRIPT_CHECKS = OrderedDict([
 ])
 
 DDL_ENFORCED = [
-    "a score row always names its height; a timing row always names its decode path and worker count",
+    "a score row always names its height and its score run; a timing row always names its decode path and worker count",
+    "a score run names the run it scores, and no other stage has a parent",
     "a shipped row's (lane, step) is one of the lane's steps",
     "`measured` needs an evidence class; `policy` needs a reason; a `classified` cut check needs a reason",
     "a derived constant carries its inputs and its precision; a policy constant carries its value and its reason; a measured one has no typed value",
@@ -788,6 +794,11 @@ MUTATIONS = [
      "x_timing_run_not_alone"),
     ("a run on a blocked host", "UPDATE host SET blocked = 'the fix' WHERE host = 'media-01'",
      "x_run_on_a_blocked_host"),
+    ("a score run whose parent is a timing run", "UPDATE run SET parent_run_id = 'b580-qsv-av1-time' WHERE run_id = 'b580-qsv-av1-score'",
+     "x_score_run_without_parent"),
+    ("a timing run beside a score run on the other runtime of its machine",
+     "UPDATE run SET state = 'running' WHERE run_id IN ('b580-qsv-av1-time', 'b580-qsv-av1-score')",
+     "x_timing_run_not_alone"),
     ("a run whose unit is not in its host", "UPDATE run SET host = 'eta' WHERE run_id = 'b580-qsv-av1-screen'",
      "x_run_unit_not_on_host"),
     ("a verdict with no encodes behind it", "DELETE FROM setting_verdict_cell WHERE verdict_id = 3",
@@ -820,7 +831,7 @@ MUTATIONS = [
 ]
 
 DDL_REFUSALS = [
-    ("a score with no height", "INSERT INTO score (cell_key, height, metric, statistic, value) VALUES ('c-a24-tng', NULL, 'vmaf', 'p5', 1.0)"),
+    ("a score with no height", "INSERT INTO score VALUES ('b580-qsv-av1-score', 'c-a24-tng', NULL, 'vmaf', 'p5', 1.0, 'S1', 'x')"),
     ("a shipped step the lane does not have", "INSERT INTO shipped (lane, host, step, provenance, decided_by) VALUES ('kids-ipad-standard-sdr','media-01','remux','derived','measurement')"),
     ("measured with no evidence class", "UPDATE shipped SET content_class_id = NULL WHERE shipped_id = 1"),
     ("a policy decision with no reason", "UPDATE shipped SET reason = NULL WHERE shipped_id = 4"),
@@ -854,6 +865,11 @@ DDL_REFUSALS = [
     ("an inventory run naming a unit",
      "INSERT INTO run (run_id, encoder_unit_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha, harness_version, started_at) "
      "VALUES ('r', 'intel-b580-ihd26.2.2-qsv-av1', 'media-01', 'media-01-b580', 'inventory', 'a', 'b', 's', 'g0', '2026-09-05')"),
+    ("a score with no run", "INSERT INTO score VALUES (NULL, 'c-a24-tng', 1548, 'vmaf', 'p5', 1.0, 'S1', 'x')"),
+    ("a score run with no parent",
+     "INSERT INTO run (run_id, encoder_unit_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha, harness_version, started_at) "
+     "VALUES ('r', 'intel-b580-ihd26.2.2-qsv-av1', 'media-01-score', 'media-01-score', 'score', 'a', 'b', 's', 'g0', '2026-09-05')"),
+    ("an encode run with a parent", "UPDATE run SET parent_run_id = 'b580-qsv-av1-locate' WHERE run_id = 'b580-qsv-av1'"),
     ("an event by nobody", "INSERT INTO run_event (run_id, at, state) VALUES ('b580-qsv-av1', '2026-09-03T03:00', 'running')"),
 ]
 

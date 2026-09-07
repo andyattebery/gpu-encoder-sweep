@@ -523,8 +523,8 @@ flag, and `cell_setting` is what it became.
 ### Measurement
 
 <!-- BEGIN GENERATED: schema:measurement -->
-    run                    run_id · encoder_unit_id · content_class_id · search_id · host
-                           · node_label
+    run                    run_id · encoder_unit_id · content_class_id · search_id
+                           · parent_run_id · host · node_label
                            · stage ∈ {inventory, materialise, verify, screen, locate, encode, score, time, split, concurrency, viewing, probe, calibrate}
                            · artifact · ffmpeg_build · ffmpeg_sha · scorer_build
                            · ffvship_version · metric_backend · harness_version · started_at
@@ -542,13 +542,13 @@ flag, and `cell_setting` is what it became.
     encode                 cell_key · bytes · bitrate_kbps · frames · duration_s
                            · decode_path ∈ {hardware, software} · kept                             ROW (encode core)
     cell_failure           cell_key · at · stderr · rc                                             ROW (encode core)
-    score                  cell_key · height
+    score                  run_id · cell_key · height
                            · metric ∈ {ssimulacra2, butteraugli, vmaf, cambi, psnr_y, float_ssim}
                            · statistic ∈ {mean, p5, min, max} · value · recipe · scorer_build      ROW (score)
     timing                 cell_key · workers · repeat_index · fps · wall_s
                            · decode_path ∈ {hardware, software} · is_warmup · noise_floor_pct
                            · leg ∈ {full, decode, decode_filters}                                  ROW (time)
-    step_trace             cell_key · height
+    step_trace             run_id · cell_key · height
                            · scoring_step ∈ {rescale_ref, rescale_enc, ssimu2, butteraugli, libvmaf}
                            · seconds · cores_busy · gpu_mean · gpu_max                             ROW (score)
     setting_verdict        verdict_id · encoder_unit_id · setting_id · window_id
@@ -860,6 +860,7 @@ erDiagram
 ```mermaid
 erDiagram
     host ||--o{ run : "host"
+    run ||--o{ run : "parent_run_id"
     search ||--o{ run : "search_id"
     content_class ||--o{ run : "content_class_id"
     encoder_unit ||--o{ run : "encoder_unit_id"
@@ -873,8 +874,10 @@ erDiagram
     cell ||--|| encode : "cell_key"
     cell ||--|| cell_failure : "cell_key"
     cell ||--o{ score : "cell_key"
+    run ||--o{ score : "run_id"
     cell ||--o{ timing : "cell_key"
     cell ||--o{ step_trace : "cell_key"
+    run ||--o{ step_trace : "run_id"
     setting ||--o{ setting_verdict : "base_setting_id"
     window ||--o{ setting_verdict : "window_id"
     setting ||--o{ setting_verdict : "setting_id"
@@ -902,6 +905,7 @@ erDiagram
         TEXT encoder_unit_id FK
         TEXT content_class_id FK
         TEXT search_id FK
+        TEXT parent_run_id FK
         TEXT host FK
         TEXT node_label
         TEXT stage "inventory | materialise | verify | screen | locate | encode | score | time | split | concurrency | viewing | probe | calibrate"
@@ -957,6 +961,7 @@ erDiagram
         INTEGER rc
     }
     score {
+        TEXT run_id PK, FK
         TEXT cell_key PK, FK
         INTEGER height PK
         TEXT metric PK "ssimulacra2 | butteraugli | vmaf | cambi | psnr_y | float_ssim"
@@ -977,6 +982,7 @@ erDiagram
         TEXT leg PK "full | decode | decode_filters"
     }
     step_trace {
+        TEXT run_id PK, FK
         TEXT cell_key PK, FK
         INTEGER height PK
         TEXT scoring_step PK "rescale_ref | rescale_enc | ssimu2 | butteraugli | libvmaf"
@@ -1138,6 +1144,7 @@ Every foreign key, child to parent:
     cut.reference_set_id -> reference_set.reference_set_id
     cut_check.cut_id -> cut.cut_id
     run.host -> host.host
+    run.parent_run_id -> run.run_id
     run.search_id -> search.search_id
     run.content_class_id -> content_class.content_class_id
     run.encoder_unit_id -> encoder_unit.encoder_unit_id
@@ -1151,8 +1158,10 @@ Every foreign key, child to parent:
     encode.cell_key -> cell.cell_key
     cell_failure.cell_key -> cell.cell_key
     score.cell_key -> cell.cell_key
+    score.run_id -> run.run_id
     timing.cell_key -> cell.cell_key
     step_trace.cell_key -> cell.cell_key
+    step_trace.run_id -> run.run_id
     setting_verdict.base_setting_id -> setting.setting_id
     setting_verdict.window_id -> window.window_id
     setting_verdict.setting_id -> setting.setting_id
@@ -1286,7 +1295,7 @@ each change of grain is exactly where an aggregation bug enters.
 | **locate** | `(arm, coarse rung, window)` | `content_class`, `setting`, `cut` (reference) | `encode`, `cell_failure` — the plan (`run`, `run_window`, `cell`, `cell_setting`) was rows at launch |
 | **derive ladders** | `(arm, window)` | locate `encode`, `cell_setting`, `search_target`, `ladder_rung` | **`arm_ladder_rung`** — carrying the locate run, never the spec |
 | **encode** | `(arm, rung, window)`, plus the incumbent arm at its pinned anchor on every member | `content_class`, `ladder`, `setting`, `cut` (reference) | `encode`, `cell_failure` — the plan was rows at launch |
-| **score** | `(cell, height, metric, statistic)` | `cell` | **`score`**, `step_trace` |
+| **score** | `(score run, cell, height, metric, statistic)` — a run of its own over its parent's cells | `cell` | **`score`**, `step_trace` |
 | **time** | `(cell, workers, repeat)` | `cut` (source) | **`timing`**, read PARTITIONED by `decode_path` |
 | **rank** | `(arm, window)` → **MEDIAN** → `(arm)` | `score`, `encode`, `cell_setting` | ⚠ **nothing** |
 | **categorise** | `(arm)` | `score`, `timing` | ⚠ **nothing** |
@@ -1477,12 +1486,13 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 | `x_run_state_disagrees_with_events` | a run whose stored state is not its latest event -- the column and its log disagree | a run's state changes only through an event; post the event and the column follows |
 | `x_timing_run_not_alone` | a time, split or concurrency run active on a machine with any other active run -- the box is not quiet | wait for the machine's other run to finish, or abandon it; a timing run runs alone on its machine, whichever runtime holds the other |
 | `x_run_on_a_blocked_host` | a run on a host that is blocked -- refused at the moment of use, with the fix | unblock-host once the fix it names is done, or plan the run on another host |
-| `x_run_unit_not_on_host` | a run whose unit is not in the host it ran on | plan the run on a host that has the unit (add-unit puts a unit on a host) |
+| `x_run_unit_not_on_host` | a run whose unit is not in the host it ran on -- a score run is exempt: its unit is its parent's, and its host holds the scorer | plan the run on a host that has the unit (add-unit puts a unit on a host) |
 | `x_verdict_without_cells` | a screen verdict with no encodes behind it -- a probe that did not run is not evidence | the screen posts a verdict with the cells it summarises; re-run the probe |
 | `x_encode_short_of_frames` | an encode with fewer frames than its cut -- a leg is verified by FRAME COUNT, never exit status | the encode did not run to the end; read its stderr, fix the cause and re-encode the cell |
 | `x_cell_without_a_rate_mode` | a cell whose identity settings carry no rate-control mode -- the mode is derived from what is set, never read off argv | plan the cell with its rate-control setting among the identity settings; a mode read off argv is not a setting |
 | `x_search_height_not_a_lane_height` | a search scored at a height that is not a served lane's panel height -- the height is a decision, never a default | author-search with score_height equal to a served lane's score_height |
 | `x_score_at_another_height` | a score at a height other than its search's -- rows carrying more than one height are refused | score at the search's height only; the height is decided once, in author-search |
+| `x_score_run_without_parent` | a score run whose parent is not an encoding run of the same search and class | score runs are planned from an encode, screen, locate or viewing run of the same search and class; re-plan it from one |
 | `x_reference_cut_unchecked` | a reference cut in use with no content check passed or classified -- a faithful copy of a broken cut passes every sha | verify the reference set to a passed content check, or classify-cut with the reason, before define-class uses the cut |
 | `x_discarded_without_score` | an encode-stage reference encode discarded before it was scored -- staging is removed only on a clean finish | keep the encode until its score record lands; staging is removed only on a clean finish |
 | `x_arms_with_disjoint_bitrate_spans` | locate arms whose bitrate spans do not intersect on a window -- widen the locate sweep | widen the locate sweep on that window until every arm's bitrate span overlaps the others' |
@@ -1495,5 +1505,5 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 | `content_rate_meets_floor` (script) | content minutes per wall minute per (lane, host) at the shipped setting and worker count meets the lane's floor; a floor with no timing behind it is UNMEASURED, not unchanged | time the shipped setting on that (lane, host) at that worker count; a rate under the floor ships elsewhere, or the floor changes with set-floor |
 | `tags_complete` (script) | every table carries @group, @class and @writer; FILE means a person wrote it; one writer per table | tag the table in sweep/schema.sql with @group, @class and @writer |
 
-**Enforced by the DDL itself, so no view is needed:** a score row always names its height; a timing row always names its decode path and worker count · a shipped row's (lane, step) is one of the lane's steps · `measured` needs an evidence class; `policy` needs a reason; a `classified` cut check needs a reason · a derived constant carries its inputs and its precision; a policy constant carries its value and its reason; a measured one has no typed value · an incumbent arm is pinned at its anchor; the base and the candidates are not · a score target and its height are set together or not at all; a cap that binds names its constant · one ladder per codec; a reference cut names the chain that built it · an inventory or verify run names no unit; every other stage names one.
+**Enforced by the DDL itself, so no view is needed:** a score row always names its height and its score run; a timing row always names its decode path and worker count · a score run names the run it scores, and no other stage has a parent · a shipped row's (lane, step) is one of the lane's steps · `measured` needs an evidence class; `policy` needs a reason; a `classified` cut check needs a reason · a derived constant carries its inputs and its precision; a policy constant carries its value and its reason; a measured one has no typed value · an incumbent arm is pinned at its anchor; the base and the candidates are not · a score target and its height are set together or not at all; a cap that binds names its constant · one ladder per codec; a reference cut names the chain that built it · an inventory or verify run names no unit; every other stage names one.
 <!-- END GENERATED: checks -->
