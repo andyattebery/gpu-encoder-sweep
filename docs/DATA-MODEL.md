@@ -2,14 +2,9 @@
 
 **The model. `SPEC.md` is the process it serves; `ARCHITECTURE.md` is what runs it.**
 
-⚠⚠ **THE CHANGE OF POSITION THAT SHAPES THIS DOCUMENT.** `TDARR-TRANSCODE-PLAN.md` is today
-**hand-derived from a table buried in a 4,640-line RESULTS**, and then `doc_check` verifies after the
-fact that its citations resolve. That is backwards. **Store the full results in a form that can
-answer questions, and let the build order be one of the answers** — generated, not transcribed.
-
-The schema is designed before the code because the current one was not: one producer wrote
-`data/sweep-score/`'s **44** files with **six distinct headers**, the widest 50 columns holding six
-unrelated entities, and `ms_ssim` is `0.0` in every one of the 2,999 rows that carry it.
+**The store answers questions, and the build order is one of the answers — generated, never
+transcribed.** Every measurement and every decision is a row; a document section is a query plus
+a template.
 
 ---
 
@@ -21,7 +16,7 @@ schema's tables are named for them.** `SPEC.md` uses the same words.
 
 | term | means | not | where |
 |---|---|---|---|
-| **lane** | what ships: one of Coverage's eight rows; the shipping key's first half | content · a staging label · a routing predicate | `lane` |
+| **lane** | what ships: one row of the lane table, one flat self-describing name; the shipping key's first half | content · a staging label · a routing predicate | `lane` |
 | **host** | a box; the shipping key's second half; **not** in the measurement key | a card | `host` |
 | **flow step** | what a lane does to a title: `probe` · `remux` · `quality-target-encode` · `bitrate-target-encode` | a process stage · a scoring step | `lane_step.step` |
 | **encoder unit** | `(vendor, card, driver, frontend, codec)`; the measurement key's hardware half | a host · a codec alone | `encoder_unit` |
@@ -58,7 +53,7 @@ schema's tables are named for them.** `SPEC.md` uses the same words.
 | **target** | an absolute score a `target` lane must hit, from an acceptance viewing | the incumbent's score · the cap | `search_target` |
 | **panel height** | the device's 16:9 height, both dimensions forced even, where every score is read: 1250 kids, 1548 M4 (recipe G1) | the encode height | `lane.score_height` |
 | **recipe** | a named, versioned procedure a row depends on — S1 scoring, K1 the key, W1 selection, T1 timing …; a changed recipe is a new name and a re-run | a build | `score.recipe`, `SPEC.md` |
-| **stage** | one of the process's Stages 0–11 and 10b | a Phase of the plan · a directory · a scoring step | `run.stage` |
+| **stage** | one of the process's Stages 0–11 and 10b; `run.stage` names the ones a node executes, and the diagnostics beside the column | a Phase of the plan · a directory · a scoring step | `run.stage` |
 | **phase** | one of the rewrite plan's Phases 0–5 | a process stage | the plan |
 | **scoring step** | one leg of Stage 6: rescale, ssimu2, butteraugli, libvmaf | a process stage | `step_trace.scoring_step` |
 | **admissibility test** | Stage 1's refusals: opens · which mode · monotone · decodes · range · obeys a rate | a check · the viewing | Stage 1 |
@@ -82,7 +77,7 @@ schema's tables are named for them.** `SPEC.md` uses the same words.
 | **disposition** | what the new harness does about a refusal: by construction · a check · a process rule · judgement | | `refusals.json` |
 
 **Retired words, and what replaced them:** *gate* → the viewing, an admissibility test, or
-`check_config_axes` by name · *axis* → setting, anchor, criterion or factor · *leaf* → lane, or
+a named check · *axis* → setting, anchor, criterion or factor · *leaf* → lane, or
 reference set · *stage directory* → reference set · *flow × cell* → lane · *2a / 2b / skip* → the
 flow steps · *baseline ladder* → the base arm on the codec ladder.
 
@@ -90,57 +85,11 @@ flow steps · *baseline ladder* → the base arm on the codec ladder.
 
 ## ⚠⚠ THE KEY — what a result is ABOUT. This is the thing that keeps getting lost.
 
-**Nothing else in this document matters if this is wrong.** Today there are **five partial keys and
-they do not line up**, which is why a verdict keeps being carried somewhere it was never measured.
-
-| vocabulary | where | values | what it actually names |
-|---|---|---|---|
-| **lane** | `tools/lane_axes.json` | `m4-1080p` · `m4-4k` · `standard` · `2d-animation` | **content** — its own note reads *"Native 1080p SDR live action on the m4 leaf"* |
-| **flow × cell** | `scenarios.json` | 3 flows; cells `hdr`/`sdr`, and `{gt,le}1080p-{hdr,sdr}` | **a routing predicate** — what the Tdarr flow branches on |
-| **leaf** | `Window`, `build_grid`'s `leaves` | `standard` · `2d-animation` · `m4` | **a staging label** — which stage directory the cut lives in |
-| **content_class** | `searches/*.json` | `native-1080p-sdr` | **content again**, under a different name |
-| **lane** | `runs/*.json` | `m4-1080p` on **all 26** | whatever `check_config_axes` wants |
-
-**Where they break:**
-
-- ⚠⚠ **`lane_axes.json`'s lane is CONTENT; `scenarios.json`'s cell is a ROUTING PREDICATE.** They are
-  not the same thing and neither refines the other. `m4-1080p` covers `le1080p-sdr` but says nothing
-  about `le1080p-hdr`, which is the **same resolution and the other setting set entirely**.
-- ⚠⚠ **`leaf` has no resolution or dynamic-range split at all** — yet it is what a window carries and
-  what the grid filters on. So what the *encode* is scoped by is coarser than what the
-  *routing* is scoped by.
-- ⚠⚠ **All 26 run descriptors declare `lane: m4-1080p`, including the B580 `av1_qsv` search.** Its
-  measured list was built from **eta's `av1_nvenc`** and htpc-01's `hevc_vaapi`. The lane doc records
-  this in as many words: *"the lane's `vaapi` is the 9070 XT's verdict and its `av1` is eta's
-  `av1_nvenc`, both standing in for silicon that never measured them."*
-- ⚠ **The key has been PATCHED, not defined.** `--vendor` was bolted onto `check_config_axes` on 2026-08-30
-  precisely because lane was too coarse, giving `{value: ["<vendor>"|"<vendor>/<codec>"]}` — a
-  scope-inside-a-scope. That is the shape of a missing primary key.
-
-### ⚠ AND `axis` IS THE SECOND COLLISION — it means FOUR things
-
-Exactly the same disease as `lane`, and it hides in the same way. **These are four different claims
-and only one of them is about an encoder option:**
-
-| "axis" as used today | means | the word to use |
-|---|---|---|
-| *"which axes the card honours"* · `PROBE_AXES` · `lane_axes.json` | an **encoder option** that can be swept | **setting** |
-| *"ICQ rejected as the table's axis"* · *"shifted the quality axis +2.5"* | the ladder's **independent variable** | **quality anchor** (`setting.kind`) |
-| *"SIZE AND QUALITY ARE ONE AXIS"* · *"speed is a separate axis"* | a **decision criterion** | **criterion** |
-| *"the driver is an AXIS on this lane"* · *"content class is an axis"* | an experimental **variable to hold constant or vary deliberately** | **factor** — a component of the measurement key |
-
-⚠⚠ **THE COLLISION IS NOT COSMETIC: *"the driver is an axis"* AND *"`-preset` is an axis"* ARE
-DIFFERENT KINDS OF CLAIM.** One says a result is scoped and must be re-measured when it changes; the
-other says a flag is worth screening. **Reading them as the same thing is how a screen verdict gets
-carried into a lane conclusion**, which `RESULTS` §14a records happening three times with three
-different figures for one flag, all of them correct at their own operating point.
-
-✅ **Three of the four already have a home in the schema** — `setting`, `setting.kind =
-quality_anchor`, and the `categorise` output. **The fourth, `factor`, is exactly the measurement key's
-component list**, which is why naming it matters: a factor that is not in the key is a factor nobody
-controlled for.
-⚠ **The screen's output table is therefore `setting_verdict`, not `axis_verdict`** — and
-`lane_axes.json` does not survive as a file at all: it is `setting_verdict` plus a policy.
+**Nothing else in this document matters if this is wrong.** Several partial keys that do not line
+up is how a verdict keeps being carried somewhere it was never measured; one key, defined once, is
+the fix. *Setting*, *anchor*, *criterion* and *factor* are four words for what one word used to
+mean — Terminology has them — and the screen's output table is `setting_verdict`, because a factor
+that is not in the key is a factor nobody controlled for.
 
 ### The two keys, and they are different
 
@@ -174,94 +123,6 @@ host has, plus policy. **Two keys, joined by an explicit decision — not one ke
 
     shipped(lane, host, step)  ──selects──►  encoder_unit  ──measured in──►  score/timing rows
 
-### ✅ The lane names, and the table that already gets closest
-
-**`TDARR-TRANSCODE-PLAN.md`'s `## Coverage` table names the lanes**, and that naming is the missing
-piece — one flat, self-describing name per lane, so nothing has to be reconstructed from a
-cross-product:
-
-    kids-ipad-standard-sdr      kids-ipad-2d-animation-sdr    m4-ipad-le1080p-sdr    m4-ipad-gt1080p-sdr
-    kids-ipad-standard-hdr      kids-ipad-2d-animation-hdr    m4-ipad-le1080p-hdr    m4-ipad-gt1080p-hdr
-
-**Eight lanes. That is the `(flow, cell)` half of the shipping key, named.** It replaces `lane`,
-`leaf` and `flow`+`cell` — three of the five vocabularies — with one.
-
-⚠ **`Coverage` defines the lane; `WHICH NODE RUNS WHAT` adds the host.** Together they are the whole
-shipping key, and the separation is right: what a lane IS does not depend on which card runs it.
-
-**`WHICH NODE RUNS WHAT` is already the join** — rows are the lane, columns are the host, cells name
-the encoder. What it does not carry, and each omission is one this campaign has been bitten by:
-
-1. **The rest of the encoder unit.** `hevc_nvenc` is frontend + codec. **Vendor, card and driver are
-   left implied by the host column** — the proxy that fails, because media-01 holds two cards and
-   the driver is a measured FACTOR.
-2. **The content class each value was measured on.** Nowhere in either table.
-3. **The shipped value**, which lives in separate per-flow tables further down.
-
-**Filled in, it is the store's central view — and the carries stop being invisible:**
-
-| lane | host | encoder unit | shipped | prov | measured on |
-|---|---|---|---|---|---|
-| `kids-ipad-standard-*` | media-01 · eta | `nvidia, nvenc, hevc` | `-cq 28 -preset p4` | measured | kids |
-| `kids-ipad-standard-*` | htpc-01 | `amd/9070XT, vaapi, hevc` | `-global_quality 22` | measured | kids |
-| `kids-ipad-2d-animation-*` | media-01 · eta | `nvidia, nvenc, hevc` | `-cq 34 -preset p3` | measured | kids |
-| `kids-ipad-2d-animation-*` | htpc-01 | `amd/9070XT, vaapi, hevc` | `-global_quality 26` | measured | kids |
-| `kids-ipad-2d-animation-hdr` | *(all three)* | *(as above)* | *(the SDR lane's values)* | ⚠ **no-content** | ⚠ **the SDR lane** |
-| `m4-ipad-gt1080p-{sdr,hdr}` | media-01 | `nvidia/A4000, nvenc, hevc` | `-qp 15` | ⚠ **derived** | m4-4k |
-| `m4-ipad-gt1080p-{sdr,hdr}` | eta | `nvidia/5060Ti, nvenc, hevc` | `-qp 14` | measured | m4-4k |
-| `m4-ipad-gt1080p-{sdr,hdr}` | htpc-01 | `amd/9070XT, vaapi, hevc` | `-global_quality 14` | measured | m4-4k |
-| `m4-ipad-le1080p-hdr` | all three | *(the HEVC set, verbatim)* | as above | ⚠ **no-content** | ⚠⚠ **m4-4k — a DIFFERENT resolution class** |
-| `m4-ipad-le1080p-sdr` | **eta only** | `nvidia/5060Ti, nvenc, av1` | `-cq 20 -preset p2 -tune uhq` | measured | m4-1080p |
-| `m4-ipad-le1080p-sdr` | media-01 · htpc-01 | ❌ no AV1 encoder / declined | — | — | — |
-
-⚠⚠ **THE LAST COLUMN IS THE POINT, AND TODAY IT EXISTS NOWHERE.** Two lanes are backed by a content
-class that is not their own — `m4-ipad-le1080p-hdr` takes values measured on **`gt1080p`** content, and
-`kids-ipad-2d-animation-hdr` takes the SDR lane's. ✅ **Both are legitimate**; both are `no-content`,
-so there was nothing to measure. **The point is that a cross-key carry should LOOK DIFFERENT from a
-measurement**, and nine carries have been withdrawn here because it did not.
-
-⚠ **`Coverage`'s own columns are lane ATTRIBUTES and belong in the store** — all thirteen: codec,
-steps, input width, input and output dynamic range, output resolution, hdr handling, audio,
-subtitles, score target, score height, bitrate cap, has-content. ✅ **The predicate
-column says `<= 1920` / `> 1920`, which is right** — the doc warns a height test mis-files a scope
-title, since 2560x1080 is `>1080p` class at height 1080. ✅ **And the M4 names now match
-`scenarios.json`'s cell names exactly**, so `Coverage` and the case set share one vocabulary
-instead of two.
-
-⚠ **And `WHICH NODE RUNS WHAT` states the rule the key formalises, one line below itself:** *"Two
-further narrowings apply INSIDE a cell and are NOT routing — do not fold them into the table above."*
-`bitrate-target-encode` being NVIDIA-only and the `~10 Mbps` rule are **conditions on the shipping key**, not new
-lanes. **A key with a scope field holds them; a matrix cannot, which is why the doc has to warn.**
-
-### ⚠⚠ A WORKED DEMONSTRATION — the question is trivial and the current data cannot answer it
-
-**Question: what does each lane cost in Mbps, per host?** It is the obvious next column for
-`Coverage`, and it took three attempts to find out that the CSVs cannot answer it.
-
-    attempt 1   joined on (encoder, quality)                -> pooled FOUR LANES together
-    attempt 2   joined on (encoder, quality, leaf, node)    -> pooled DIFFERENT WINDOW SETS
-    attempt 3   + window, per-window then median            -> media-01 +164.5% over eta
-
-**+164.5% at the same `qp14` on the same six windows** — against `RESULTS` §6a's measured **~7%**.
-The number is an artefact: for `got` alone the CSVs hold **six rows across FOUR distinct arms** at
-that quality — `p4`/no-tune (68.27, twice), `p2 uhq` (34.93, twice), `p4 uhq` (26.29) and one VBR
-config (85.90) — while eta holds one. **The median picked whichever landed in the middle.**
-
-Controlling for the **full key** (`preset=p2 tune=uhq extra=-rc=constqp height=2160`):
-
-    got   eta 27.05  media-01 34.93   +29.1%
-    phm   eta 30.63  media-01 32.70    +6.8%          n=2 -- an indication, not a result
-
-⚠⚠ **THE JOIN KEY I REACHED FOR — `(encoder, quality, leaf, window, node)` — LOOKS SUFFICIENT AND
-SILENTLY AVERAGES ACROSS PRESET, TUNE AND RATE CONTROL.** That is the whole argument for the key in
-one query. **A store that enforces it either answers or refuses; a directory of CSVs averages.**
-
-✅ **What survives without the key, because it is robust to the pooling:** the lane-level **binding
-verdict**. The kids lanes are **7–27x under** the ceiling on every arm and every host; the M4 4K
-lanes are **over it on every arm and every host**. That is a lane attribute and belongs in
-`Coverage`. ⚠ **The magnitude is a `(lane × host × encoder_unit)` quantity and belongs in the
-shipping table**, computed against the full key.
-
 ### What this makes possible
 
 - **A comparison refusal that is structural.** Two results may be compared only when their
@@ -269,9 +130,9 @@ shipping table**, computed against the full key.
   cost days, three times — is two keys differing in **content_class, vendor, card, driver and
   frontend simultaneously**, and a key check rejects it in one line.
 - **A transfer becomes explicit.** Reusing a verdict across a key boundary is a `derived` value with
-  a recorded reason, not an unremarked carry. **Nine such carries have been withdrawn.**
-- **`check_config_axes` stops needing a second scope.** `--vendor` exists because `lane` was too coarse;
-  with the key defined, the check compares keys.
+  a recorded reason, not an unremarked carry.
+- **A scope inside a scope stops being needed.** A vendor bolted onto a lane is the shape of a
+  missing primary key; with the key defined, a check compares keys.
 - **One name per concept.** `lane`, `leaf`, `cell`, `content_class` and `flow` stop being five words for
   four different things.
 
@@ -289,7 +150,8 @@ and the files those windows were turned into. They are three kinds of table with
     POPULATION       title              the library, from a scan                       ROW
     SAMPLE           window             a cut of a title, proposed then PINNED         FILE
                      content_class      a named set of windows                         FILE
-    MATERIALISATION  reference_set      the class through ONE chain at ONE geometry    ROW
+    MATERIALISATION  reference_set      the class's cuts at ONE geometry, each through
+                                        its title's lane's chain                        ROW
                      cut                one window's two files: REFERENCE and SOURCE   ROW
 
 ⚠ **`stage` keeps one meaning in this document: a step of the process.** The directory of cuts the
@@ -299,8 +161,8 @@ old tree also called a stage is a `reference_set`. Same discipline as the `axis`
 
 `title` is the inventory — path, library, width, height, dynamic range and DV profile, video codec,
 field order, audio and subtitle layout — one row per library file, from a scan, dated. **A lane's
-population is then a query**: `lane.input_width_predicate` and `input_dynamic_range` over `title`.
-Three things that are prose today become joins:
+population is then a query**: `lane.input_width_min`/`input_width_max` and `input_dynamic_range`
+over `title` (`v_lane_population`). Three things that were prose become joins:
 
 - `lane.has_content` must agree with the population being non-empty.
 - **A class is sampled for the lanes it serves, from the UNION of their populations.** The kids
@@ -314,12 +176,10 @@ Three things that are prose today become joins:
   host rule, the default-audio fallback — are predicates over `title`, and how many titles each
   reaches is a count rather than a guess.
 
-⚠ **The second join already bites on the current sample.** All four `standard` windows — soul, walle,
-interstellar, joker — are 4K HDR remuxes, chosen as the hardest case. `kids-ipad-standard-sdr` takes
-SDR input, and its population — most of the kids library — has no member in the class at all. **The
-lane was always meant for any content, so the fix is to sample SDR content into the class, not to
-relabel the lane** — but until that happens the honest marker is `derived`, and the build order says
-`measured`. The join shows the gap; a reader did not.
+⚠ **The second join is the one that bites.** A class assembled from the hardest cases of one dynamic
+range can leave a lane meant for any content with no member at all. **The fix is to sample that
+content into the class, not to relabel the lane** — and until that happens the join marks the value
+`derived`, whatever the row says. The join shows the gap; a reader does not.
 
 ### Sample — a window is a pinned cut, a class is an authored set, and a class covers CHARACTERS
 
@@ -355,9 +215,9 @@ relabel the lane** — but until that happens the honest marker is `derived`, an
   are queries. **The judgement half is the MIX** — the character strata, matched against
   `window.character`, with an estimated share. **Every non-empty stratum and every quantile maps
   to at least one window**, and allocation beyond that follows the stratum's share of what reaches
-  the encoder, because a median over windows weights strata by their window count. ⚠ **`any` in
-  `Coverage` is right, and it compresses the SAMPLE, not the lane** — the frame is where `any` is
-  uncompressed, one stratum at a time. A stratum whose verdict disagrees with the others is the
+  the encoder, because a median over windows weights strata by their window count. ⚠ **`any` in a
+  lane's input predicate is right, and it compresses the SAMPLE, not the lane** — the frame is
+  where `any` is uncompressed, one stratum at a time. A stratum whose verdict disagrees with the others is the
   only measured reason to add a lane.
 - ⚠⚠ **A CLASS IS EDITED, NEVER SUBSETTED PER RUN.** *"The window set is not a sample to economise
   on — it IS the class, so a window comes out only when the class does."* When `sopranos` left the
@@ -380,16 +240,16 @@ relabel the lane** — but until that happens the honest marker is `derived`, an
 - **The reference is the chain minus the encoder** — decoded, scaled, tonemapped, stored lossless —
   where the chain is the one the title's lane would apply: an HDR title through the tonemap, an SDR
   title without it, a passthrough lane decode alone. **A class can hold both, because the encoder
-  sees the same kind of pixels either way, and measuring any content is the point.** `cut.chain` is
-  the `chain(lane, host)` of the host that built it, authored before the sample. **The reference is both the encode source and
-  the score reference, so a quality cell measures the ENCODER**; the chain never runs in the scored
-  path.
+  sees the same kind of pixels either way, and measuring any content is the point.** `cut.chain_lane`
+  and `chain_host` name the chain that built it, authored before the sample. **The reference is both
+  the encode source and the score reference, so a quality cell measures the ENCODER**; the chain
+  never runs in the scored path.
 - **The source cut is the window `-c copy`** — the file the flow itself would read. Throughput
   measures the whole chain and needs it. **Two kinds of cut, two pipelines, and a stage says which
   it reads.**
 - ⚠⚠ **Built ONCE, on one host, and every card encodes the SAME pixels.** `content_sha` hashes
   decoded frames, not the container, and it is checked equal on every node before anything is
-  scored. That is what makes one card's §4 column comparable to another's. A class is bound to
+  scored. That is what makes one card's lookup column comparable to another's. A class is bound to
   exactly one `reference_set`; the same windows through another chain or at another geometry are
   another class, and the shared windows stay visible through `window_id`.
 - **`cut_check` is a content check, not a checksum** — a faithful copy of a broken cut passes every
@@ -473,25 +333,16 @@ question is a query; a document section is a query plus a template.
 
 | | **the lookup table** | **the build order** |
 |---|---|---|
-| doc | `RESULTS` §4 | `TDARR-TRANSCODE-PLAN.md` |
 | asks | *what setting hits target t on this card, and what does it cost* | *what exact command does this title get* |
 | grain | per (card × content class × codec × window × target) | **ONE value per (lane, host, step)** |
 | unit | a window | a title |
 | may be | only `measured` | `measured`, `derived`, or `no-content` |
 | may it override a measurement? | no | ⚠ **yes, and it does** |
 
-The build order carries decisions that are not measurements at all:
-
-- **`-qp 15` on media-01 is `derived`** — 53 encodes on that rung and **zero scored rows on the whole
-  HEVC ladder**; a budget interpolation between scored qp14 and qp17, and the only setting in that
-  lane confirmed by eye.
-- **The kids worker counts are a POLICY DECISION** sitting below what throughput alone would pick —
-  *"do not 'correct' them from the throughput table."*
-- **Two cells are `no-content`** and still carry settings, so the flow has no hole.
-
-⚠ **`CLAUDE.md`'s own rule: CAPABILITY AND SHIPPING ARE DIFFERENT TABLES**, and §8 records what
-happens when one is baked into the other. So shipping is a table in the store, not a column on a
-measurement.
+The build order carries decisions that are not measurements at all — a budget interpolation between
+two scored rungs, confirmed by eye; a worker count held below what throughput alone would pick; a
+`no-content` row that still carries settings so the flow has no hole. **Capability and shipping are
+different tables**, so shipping is a table in the store, not a column on a measurement.
 
 ---
 
@@ -542,11 +393,11 @@ No writer derives its header from the first row it happens to have.
 <!-- END GENERATED: schema:reference -->
 
 ⚠⚠ **`encoder_unit` IS A TABLE, SO THE MEASUREMENT KEY IS A FOREIGN KEY RATHER THAN A CONVENTION.**
-Every place that today writes `--node media-01-b580` and hopes points at a row naming vendor, card,
+Every place that once wrote a node label and hoped points at a row naming vendor, card,
 **driver** and frontend explicitly.
 
-⚠⚠ **`setting.canonical_id` IS WHAT MAKES A CROSS-VENDOR QUESTION POSSIBLE AT ALL.** `-rc constqp`
-(nvenc), `-rc_mode CQP` (vaapi) and QSV's `-q:v` are **one concept in three spellings**; `-qp`, `-cq`,
+⚠⚠ **`setting_role` — A SETTING'S CANONICAL CONCEPTS — IS WHAT MAKES A CROSS-VENDOR QUESTION
+POSSIBLE AT ALL.** `-rc constqp` (nvenc), `-rc_mode CQP` (vaapi) and QSV's `-q:v` are **one concept in three spellings**; `-qp`, `-cq`,
 `-global_quality` and `-q:v` are four spellings of *a position on a ladder*. Without a canonical id
 no `GROUP BY` can ever unify them, and the campaign's whole cross-vendor half is unanswerable.
 
@@ -564,25 +415,23 @@ card's private dump including AMD's, so the grep could only ever return "absent"
 list is not the option set.**
 
 ⚠ **`setting_scope.default_is_measured`** carries the other half: `-b_strategy`'s default is `-1`,
-measured byte-identical to `1`. **Absent is not "off"** — and today nothing records which.
+measured byte-identical to `1`. **Absent is not "off"** — and without it nothing records which.
 
 ⚠⚠ **`content_class` IS A WINDOW SET, AND THAT IS THE POINT.** *"The window set is not a sample to
 economise on — it IS the content class."* Making it a foreign key means a verdict cannot silently
 cross content: the rows either share a `content_class_id` or they do not. **Its tables are under
 *The sample*, below.**
 
-⚠⚠ **`lane` IS THE PRIMARY KEY OF THE SHIPPING SIDE, AND `TDARR-TRANSCODE-PLAN.md`'s `## Coverage`
-IS THIS TABLE.** Eight rows. It replaces `lane` (`lane_axes.json`), `leaf` and `flow`+`cell` — three
-of the five colliding vocabularies — with one flat, self-describing name. ⚠ **`content_class`
+⚠⚠ **`lane` IS THE PRIMARY KEY OF THE SHIPPING SIDE.** One row per lane, one flat, self-describing
+name, replacing every vocabulary that used to stand in for it. ⚠ **`content_class`
 survives separately**, because it is the MEASUREMENT side: a lane is what ships, a content class is
 what was measured on.
 
 ⚠ **`codec` is a LANE property; `encoder` is NOT.** `hevc` is the lane; `hevc_nvenc` vs `hevc_vaapi`
-is the host. **Merging them is where `Lane A`/`Lane B` originally went wrong.**
+is the host. **Merging them is how a ladder gets attributed to a node.**
 ⚠ **`steps` is an enum and the names say what they produce** — `probe` · `remux` ·
 `quality-target-encode` · `bitrate-target-encode`. The kids lanes are one step; the M4 lanes are a
-probe followed by exactly one of the other three. ⚠ *`2a`/`2b` were outline numbers from a plan, and
-`skip` never skipped the title* — it always rebuilt the container and re-encoded audio.
+probe followed by exactly one of the other three.
 ⚠⚠ **`score_target` WITHOUT `score_height` IS NOT A NUMBER**, and the pair is never comparable across
 lanes: SSIMULACRA2 is scale-sensitive by up to 23 points and each lane scores against its own
 reference. **Read a row, never a column.**
@@ -600,15 +449,15 @@ lane, per lane because the M4 lanes tolerate slower conversion than the kids lan
 the rate per `(lane, host)` from the timing rows at the shipped setting and N\*; a row under the floor
 is refused, a floor with no timing behind it is UNMEASURED, and a NULL floor reports only.
 
-⚠⚠ **`ladder` IS PER CODEC, NEVER PER HOST.** Treating it as a node property put **two false claims**
-in the build order, both since deleted.
+⚠⚠ **`ladder` IS PER CODEC, NEVER PER HOST.** Treating it as a node property has put false claims
+in a build order.
 
     HEVC   4 6 8 10 11 14 15 16 17 18 20 22 26 28 30 32 34 36 38 42 46
     AV1    15 20 22 24 25 26 28 30 34 35 40 45 50 55 60
 
 **Every shipped value must be a rung — checkable, because the ladder and the value are both data.**
 
-⚠⚠ **`constant.scope` IS A FIELD, NOT A FOOTNOTE.** *"Do not reuse 20 or 0.8374 on the AV1 cell"* is a
+⚠⚠ **`constant_scope` IS A TABLE, NOT A FOOTNOTE.** *"Do not reuse 20 or 0.8374 on the AV1 cell"* is a
 rule a reader can miss; **a scope that does not admit the lane is a refusal.**
 
     CEILING         ~22 Mbps muxed         scope: all codecs      derived   ±~10%
@@ -621,8 +470,8 @@ rule a reader can miss; **a scope that does not admit the lane is a refusal.**
 ⚠ **A `measured` constant has NO typed value.** Its value is a `constant_value` row from the calibrate
 stage, naming the run it was computed on, and `v_constant_current` reads the latest; a measured
 constant with none is refused, and so is one with a typed value. A `policy` constant is typed and carries
-its reason — `MARGIN` is one: `RESULTS` §19.8 calls it a policy choice bounded from below by the probe's
-precision, and an earlier draft of Stage 10b had it as the request headroom, which is `HEADROOM`.
+its reason — `MARGIN` is one: a policy choice bounded from below by the probe's precision — and not the request
+headroom, which is `HEADROOM`.
 ⚠⚠ **AND `derived` IS NOT ENOUGH ALONE — A DERIVED CONSTANT CARRIES ITS INPUTS AND ITS PRECISION.**
 `CEILING` is `512e9 x 8 / (50 x 3600)`, and **both inputs are soft**: "512 GB" is marketing bytes
 rather than GiB and the usable space is less, and "~50 h" is a judgement about a trip. The same
@@ -632,17 +481,17 @@ support.**
 ⚠ **The false precision propagates into the commands**: `bitrate-target-encode`'s `-b:v 22148k` is
 `22.60 x 0.98` — CEILING × HEADROOM, and the 0.98 is itself unmeasured — five significant figures off a two-significant-figure input. ✅ **A command needs a
 concrete integer, so that is fine** — but only because the constant it came from is marked.
-⚠ **One live finding reads differently in this light:** *"`bitrate-target-encode` overshoots its own
-ceiling, on 15 of 15 encodes"* is a real defect **of the mechanism** — a whole-title VBV settles
-differently from a 30 s window. **But a few percent over a ±10% estimate is inside the estimate.**
-Fix the mechanism; do not treat the overshoot as a budget breach.
+⚠ **A finding reads differently in this light:** a rate-targeted encode that overshoots its ceiling
+is a real defect **of the mechanism** — a whole-title VBV settles differently from a window. **But a
+few percent over a ±10% estimate is inside the estimate.** Fix the mechanism; do not treat the
+overshoot as a budget breach.
 
-⚠ **THE `[]` FIELDS ABOVE ARE THE ONE PLACE THIS DOCUMENT TOLERATES A BLOB, AND IT SHOULD SAY SO.**
-`steps[]`, `rungs[]`, `enum_values[]`, `cites[]` and `cell_keys[]` are ordered lists of scalars with
-no attributes of their own — nothing needs to `GROUP BY` a rung. **`extra` was different in kind**: it
-carried three roles at once, order-dependently, with no way to query a flag. ⚠ **The test is whether
-anything ever needs to join on an element.** `rungs[]` does not; `cell_setting` did, and that is why
-it was normalised out.
+⚠ **`cites_json` AND `inputs_json` ARE THE ONE PLACE THIS SCHEMA TOLERATES A BLOB, AND IT SAYS SO.**
+They are ordered lists of scalars with no attributes of their own — nothing needs to `GROUP BY` a
+citation. Everything else that was once a list — a lane's steps, a ladder's rungs, a setting's enum
+values, the cells behind a verdict — is a table, because something joins on an element. **`extra`
+was different in kind**: it carried three roles at once, order-dependently, with no way to query a
+flag, and `cell_setting` is what it became.
 
 ### The sample — population, sample, materialisation
 
@@ -722,8 +571,9 @@ it was normalised out.
 typed. `run.state` is the one stored state (planned · launched · running · complete · failed ·
 abandoned), with `run_event` as its append-only log; a cell's state is `v_cell_state`, **derived** from
 its rows, never stored. `v_run_progress` is what a waiter and a status display read. A run is complete
-only once verified against its plan; a failed cell has a `cell_failure` row with its stderr; two
-active runs on a host, a run on a blocked host, and a run whose unit is not in its host are refused.
+only once verified against its plan; a failed cell has a `cell_failure` row with its stderr; a
+timing run that would share its machine, a run on a blocked host, and a run whose unit is not in its
+host are refused.
 
 ⚠ **`cell_key` is content-addressed** — recipe K1 in `SPEC.md`: `sha256` of the canonical
 JSON of the unit, the cut's content hash and kind, the window, the sorted identity settings and the
@@ -736,7 +586,7 @@ not inside it, and why a comparison reads `cell_setting` rather than the key.
 ⚠⚠ **`setting_verdict` PUTS THE SCREEN IN THE MODEL, WITH THE BASE IT WAS TAKEN UNDER AND THE
 WINDOW IT RAN ON.** A verdict of
 `INERT` recorded without its prerequisite is indistinguishable from a card that ignores the flag —
-`RESULTS` §14a.0d is a list of verdicts that had to be reclassified by hand for exactly that reason.
+verdicts have had to be reclassified by hand for exactly that reason.
 **`BASE_FAILED` is a distinct verdict from `REJECTED`**, and `noise_floor_pct` is stored because every
 speed verdict is read against it. **And it is per window: HONOURED needs one, INERT needs the
 class** — THE SAMPLE, rule 2.
@@ -761,7 +611,7 @@ class** — THE SAMPLE, rule 2.
 NORMALISING.** A shipping config is not one number — it is
 `-preset p2 -tune uhq -rc constqp -qp 15 -extra_sei 0`, a **set**. Because a measured cell decomposes
 the same way, **"is this shipped configuration one we actually measured?" becomes a set comparison
-that executes**, rather than a claim in prose. Today it is prose, and nine carried values have been
+that executes**, rather than a claim in prose. As prose it failed: nine carried values had to be
 withdrawn.
 
 ⚠ **`role` distinguishes the three things `extra` conflated**: `identity` defines the arm, `computed`
@@ -1344,7 +1194,7 @@ diagnostics `split` and `concurrency`, and the `viewing`, sit outside this list 
      7  time               repeated whole-window timings on .src.mkv           -> timing rows
      8  rank               bd_rate per window -> MEDIAN            (search only) -> per-arm efficiency
      9  categorise         EFFICIENCY / SPEED / BOTH / NEITHER     (search only) -> per-arm category
-    10  invert             tightest straddling pair -> setting per target      -> the §4 column
+    10  invert             tightest straddling pair -> setting per target      -> the lookup column
     10b calibrate          the constants the flow's per-title logic consumes    -> constant_value
     11  ship               one value per (lane, host, step); routing; deadline -> shipped · routing_exclusion
 
@@ -1353,27 +1203,17 @@ base arm on the whole codec ladder.** ⚠ **3 and 5 are two encode passes and ON
 the B580's shipping preset (+66.3% fps for +1.42% BD-rate) and two arms timed at stage 2 would have
 given it. ⚠ **8–10 write nothing.**
 
-## ⚠⚠ DOES EVERY ENCODING STAGE SHARE ONE MODEL? YES — AND TODAY THEY DO NOT.
+## ⚠⚠ EVERY ENCODING STAGE SHARES ONE MODEL
 
-**Nine stages encode. Today they emit FIVE different shapes for what is one fact:** *I encoded this
-input with these settings on this hardware, and here is what came out.*
-
-| stage | encodes | today writes | should write |
-|---|---|---|---|
-| **screen** (`probe_axis`) | probe source, one flag injected, repeated | `behaviour_<node>.json` | `run`+`cell`+`cell_setting`+`encode` **+ `setting_verdict`** |
-| **pre-pass probe** | 3 x 10 s slices of a real title | *(nothing — a bitrate is parsed and dropped)* | the same core |
-| **locate** | the coarse ladder | ledger + CSV | the same core |
-| **encode** | the scored ladder | ledger + CSV | the same core |
-| **time** | `.src.mkv`, repeated | its OWN CSV, **no ledger** | the same core **+ `timing`** |
-| **split** | truncated production argv | its OWN CSV, **no ledger** | the same core **+ `step_trace`** |
-| **concurrency** | `time` at N workers | 4 more CSVs | the same core, `workers` on `timing` |
-| **fps second-encode** | production-shaped | a column on the scored CSV | the same core |
-| **gate** | probe source against itself | a printed number | the same core |
+**Every stage that encodes — the screen, the pre-pass probe, locate, encode, time, split,
+concurrency, the viewing, the full-length encode — emits one fact:** *I encoded this input with
+these settings on this hardware, and here is what came out.*
 
 ✅✅ **THE COMMON CORE IS `run` + `cell` + `cell_setting` + `encode`, AND IT IS THE SAME FACT EVERY
 TIME.** What differs is only (a) what the INPUT was, (b) whether the output is kept, and (c) which
-ONE extra table the stage also writes. **That is the unification, and it is why the model has to be
-right before any service is written.**
+ONE extra table the stage also writes — `setting_verdict` for the screen, `timing` for time, split
+and concurrency — while the scorer's `score` and `step_trace` hang off the same cells. **That is the
+unification, and it is why the model has to be right before any service is written.**
 
 ### ⚠ What has to be true for that to hold
 
@@ -1388,13 +1228,13 @@ right before any service is written.**
 that was published and retracted as an artefact cannot be written again.
 
 ⚠⚠ **AND `encode.kept` MUST BE A COLUMN, BECAUSE MOST STAGES DISCARD.** `time` unlinks, `split`
-unlinks, the screen unlinks after every single probe encode. **Today "the encode is gone" and "the
-encode was never made" are indistinguishable after the fact**, which is how a stale CSV once
+unlinks, the screen unlinks after every single probe encode. **Without it, "the encode is gone" and
+"the encode was never made" are indistinguishable after the fact**, which is how a stale file once
 satisfied a waiter.
 
 ⚠ **The screen is `n` encodes per (setting, value), not one** — so `setting_verdict` is a SUMMARY over
-cells, and the cells behind it are exactly what is missing today. Its noise floor is five repeated
-identical encodes; **those are five rows, and nothing currently records them.**
+cells, and `setting_verdict_cell` names the cells behind it. Its noise floor is five repeated
+identical encodes; **those are five rows.**
 
 ## ⚠⚠ WHO MAY WRITE A TABLE — AUTHORED, OBSERVED, OR NEITHER
 
@@ -1411,84 +1251,39 @@ The archived harness spelled the first two as files and rows on disk and had no 
 table, the rendered list below is generated from it, and an authoring endpoint and an agent's ingest
 path never touch the same table.
 
-| artifact | in the archived tree | belongs | why |
-|---|---|---|---|
-| `tools/hosts.json` | file | **file** | hand-authored topology; a diff is exactly what you want to review |
-| `scenarios.json` | file | **file** | the case set is authored, and its cross-product is the point |
-| `searches/*.json` candidates | file | **file** — `search`, `arm`, `arm_setting`, `search_target` | the intent — which arms are worth trying, at which targets and height |
-| `stage*/windows.json` | file | ⚠ **SPLIT** | the `title, ss, t` half is `window` — machine-proposed, then **hand-pinned**, and pinning is authorship; the sha, bytes and paths half is `cut`, written by materialise. One file held both, so re-staging rewrote the authored half's meaning with nobody editing it |
-| `inventory/sample_inventory_*.csv` | 3 files | **ROW** (`title`) | a scan, dated — the lane's POPULATION, which `has_content`, a class's coverage and the per-title conditions are checked against |
-| `stage-known-non-dv.json` | file | `cut_check` | a classification WITH A REASON where the source is gone; the result is a row, the reason is authored |
-| `speed_excluded_windows` in `searches/*.json` | file | ⚠⚠ **NEITHER** | it restates `timing.decode_path`, which the decode probe MEASURES — an authored list standing in for a measurement, and it held only by accident |
-| `runs/*.json`, `probes/*.json` | file | ⚠ **ROW** — `run`, `run_event`, the planned `cell`s | the invocation exists because the orchestrator wrote it before launching; the expected count is `count(cell)`, never typed. The operator's request is a verb, not a file |
-| `preflight/behaviour_*.json` | file | ⚠ **ROW** (`setting_verdict`) | pure machine output, and it is already queried by hand |
-| `ledger-*/` one json per cell | files | ⚠ **ROW** | this IS the measurement store, spelled as a directory |
-| `tools/lane_axes.json` | file | ⚠ **derived view** | hand-maintained, and its own lane doc records it going stale in four places at once because *"nothing detects that an axis closed and the file was not updated"*. It is `setting_verdict` plus a policy, not a source |
-| **`phase-*.json`** | ⚠ **72 generated files** | ⚠⚠ **NEITHER** | emitted by `--emit`, then committed. **47 are referenced by no descriptor**; 8–11 by nothing at all. A materialised query, persisted |
-| **derived ladders** | ⚠⚠ **written INTO `searches/*.json`** | ⚠⚠ **ROW** — `arm_ladder_rung`, carrying the locate run | see below |
+### Never write machine output into a human-authored file
 
-### `scenarios.json` is Coverage x HOSTS — which is `shipped`'s key, not `lane`'s
-
-**The cross-product is exactly the same case set**, verified: `standard` 2x3x1 + `2d-animation` 2x3x1
-+ `m4` 4x3x4 = **60**, and Coverage's **8 lanes x 3 hosts x their steps** is the same 60. **It is not
-the JSON of Coverage — it is the JSON of Coverage x hosts.** Coverage deliberately omits host; that
-is `WHICH NODE RUNS WHAT`.
-
-**So the file is three things under one name:**
-
-| part | belongs |
-|---|---|
-| `axes` — the cross-product | **derivable.** `lane ⋈ host ⋈ lane.steps` is a join, not a source |
-| `exclusions` — with reasons | **rows.** "no AV1 encoder here" · "the pre-pass is NVIDIA-only" · "there is no htpc-01 recipe" are eligibility facts |
-| `must_contain` / `must_not_contain` | **file** — but as a GENERATOR TEST. Today they check a hand-written command; against a generated one they check the generator |
-| `provenance` · `cites` · `evidence` | ⚠⚠ **already `shipped`'s columns** |
-
-⚠⚠ **THAT LAST ROW IS A DUPLICATION THE MODEL REMOVES.** Provenance, citation and evidence are
-carried **both** in `scenarios.json` and in the build order's per-flow value tables — and
-`doc_check` check 11 exists to keep the two agreeing. **With one home the check is not satisfied, it
-is unnecessary.**
-
-### ⚠⚠ THE WORST CASE IS A FILE THAT IS HALF AUTHORED AND HALF GENERATED
-
-`settings_search --locate --write` **writes machine-derived ladders back into the hand-authored search
-spec**, leaving a `_ladders_derived_from` string as the only marker. **After that edit nobody can tell
-by looking which parts a person chose and which a tool computed** — and the provenance is a filename,
-so it cannot be checked.
-
-✅ **The rule: never write machine output into a human-authored file.** The candidates stay in the
-spec; the derived ladders become rows carrying the locate run that produced them. A regenerated ladder
-then supersedes cleanly instead of overwriting authorship.
-
-⚠ **This is most of the config sprawl, explained.** 70 phase files exist because a *generated*
-artifact was persisted, and once persisted it had to be named, committed, and then reasoned about
-long after the thing that generated it had moved on.
+A derived ladder written back into the search spec leaves nothing that says which parts a person
+chose and which a tool computed, and a filename as provenance cannot be checked. ✅ **The candidates
+stay in the spec; the derived ladders are rows carrying the locate run that produced them**, so a
+regenerated ladder supersedes cleanly instead of overwriting authorship. The same rule retires every
+persisted, generated file: a materialised query is a query, not a source.
 
 ## ⚠⚠ THE STAGES — what each one reads, writes, and what ONE ROW MEANS
 
 **The hard thing to see is not the tables. It is that the GRAIN CHANGES at every stage**, and that
-each change of grain is exactly where an aggregation bug enters. Counts are the real B580
-`av1_qsv` lane.
+each change of grain is exactly where an aggregation bug enters.
 
-| stage | one row is | reads | WRITES | B580 count |
-|---|---|---|---|---|
-| **sample** — frame · select · pin · materialise · verify | a cut | `title`, `lane`, `chain` | `reference_set`, `cut`, `cut_check` — the frame, `window` and `content_class` are FILES | 7 windows, 14 cuts |
-| **screen** | `(encoder_unit, setting, window)` | `setting`, `setting_scope`, `cut` (reference) | **`setting_verdict`** per window | **38** screened + 5 excluded, 4 units — ⚠ on ONE window |
-| **candidates** | the base arm, and a candidate when the screen earned it | `v_setting_unit_reading`, `setting.subsystem`, `lane`, the viewing | **`search`, `arm`, `arm_setting`, `search_target`** — FILES, the intent | 1 base + 9 candidates, 3 targets |
-| **locate** | `(arm, coarse rung, window)` | `content_class`, `setting`, `cut` (reference) | `encode`, `cell_failure` — the plan (`run`, `run_window`, `cell`, `cell_setting`) was rows at launch | **420**, encode-only, 7 windows |
-| **derive ladders** | `(arm, window)` | locate `encode`, `cell_setting`, `search_target`, `ladder_rung` | **`arm_ladder_rung`** — carrying the locate run, never the spec | 10 arms |
-| **encode** | `(arm, rung, window)`, plus the incumbent arm at its pinned anchor on every member | `content_class`, `ladder`, `setting`, `cut` (reference) | `encode`, `cell_failure` — the plan was rows at launch | **420**, 6 windows — ⚠ the class was EDITED between locate and encode |
-| **score** | `(cell, height, metric, statistic)` | `cell` | **`score`**, `step_trace` | 420 x 1 x 5 x 4 |
-| **time** | `(cell, workers, repeat)` | `cut` (source) | **`timing`**, read PARTITIONED by `decode_path` | 45 x 5 — 5 windows; `tos` untimed, it decodes in software |
-| **rank** | `(arm, window)` → **MEDIAN** → `(arm)` | `score`, `encode`, `cell_setting` | ⚠ **nothing** | 10 arms |
-| **categorise** | `(arm)` | `score`, `timing` | ⚠ **nothing** | 10 arms |
-| **invert** | `(window, target)` | `score`, `encode` | ⚠ **nothing** | 6 x 3 x 2 presets |
-| **ship** | `(lane, host, step)` | everything above, `host_unit`, `chain`, `timing` | **`shipped`, `shipped_setting`, `routing_exclusion`** — routing by support, the deadline | 8 lanes x hosts |
-| **calibrate** | a constant | the base arm's ladder, the population probe, the full-length encode | **`constant_value`** — a measured constant has no typed value; a policy one is typed with its reason | 4 measured, 1 policy, 1 derived |
-| **viewing** | a viewed pair, or an acceptance for a lane | reference-path encodes, KEPT | **`viewing_verdict`** — a person's; Stage 2 names it | never run for the 1080p lane |
+| stage | one row is | reads | WRITES |
+|---|---|---|---|
+| **sample** — frame · select · pin · materialise · verify | a cut | `title`, `lane`, `chain` | `reference_set`, `cut`, `cut_check` — the frame, `window` and `content_class` are FILES |
+| **screen** | `(encoder_unit, setting, window)` | `setting`, `setting_scope`, `cut` (reference) | **`setting_verdict`** per window |
+| **candidates** | the base arm, and a candidate when the screen earned it | `v_setting_unit_reading`, `setting.subsystem`, `lane`, the viewing | **`search`, `arm`, `arm_setting`, `search_target`** — FILES, the intent |
+| **locate** | `(arm, coarse rung, window)` | `content_class`, `setting`, `cut` (reference) | `encode`, `cell_failure` — the plan (`run`, `run_window`, `cell`, `cell_setting`) was rows at launch |
+| **derive ladders** | `(arm, window)` | locate `encode`, `cell_setting`, `search_target`, `ladder_rung` | **`arm_ladder_rung`** — carrying the locate run, never the spec |
+| **encode** | `(arm, rung, window)`, plus the incumbent arm at its pinned anchor on every member | `content_class`, `ladder`, `setting`, `cut` (reference) | `encode`, `cell_failure` — the plan was rows at launch |
+| **score** | `(cell, height, metric, statistic)` | `cell` | **`score`**, `step_trace` |
+| **time** | `(cell, workers, repeat)` | `cut` (source) | **`timing`**, read PARTITIONED by `decode_path` |
+| **rank** | `(arm, window)` → **MEDIAN** → `(arm)` | `score`, `encode`, `cell_setting` | ⚠ **nothing** |
+| **categorise** | `(arm)` | `score`, `timing` | ⚠ **nothing** |
+| **invert** | `(window, target)` | `score`, `encode` | ⚠ **nothing** |
+| **ship** | `(lane, host, step)` | everything above, `host_unit`, `chain`, `timing` | **`shipped`, `shipped_setting`, `routing_exclusion`** — routing by support, the deadline |
+| **calibrate** | a constant | the base arm's ladder, the population probe, the full-length encode | **`constant_value`** — a measured constant has no typed value; a policy one is typed with its reason |
+| **viewing** | a viewed pair, or an acceptance for a lane | reference-path encodes, KEPT | **`viewing_verdict`** — a person's; Stage 2 names it |
 
 ### Where the grain collapses — and what has to be true at each collapse
 
-    (arm, rung, window)          420 cells
+    (arm, rung, window)          every cell
         |  score: FANS OUT           x height x metric x statistic
     (cell, height, metric, stat)
         |  rank:  COLLAPSES rungs -> bd_rate   ⚠ over a SHARED bitrate range
@@ -1564,12 +1359,6 @@ it did not name.
 | 3 · refuse the surplus | `(…, window)` still pooled **four arms** — p4/no-tune, p2/uhq, p4/uhq and a VBR config — and the median picked whichever landed in the middle, giving **+164.5%** against a real **~7%** |
 | 4 · bd_rate over a shared range | same-`cq` comparison measured **who spent more bits**: `uhq` at 6.98 Mbps against no-tune at 11.79 |
 
-✅ **THE PRECEDENT IS ALREADY IN THE REPO, NARROWLY.** `tools/codec_verdict.py` and
-`tools/m4_1080p_operating_point.py` **refuse to put two lanes in one table**, and `CLAUDE.md` names
-them as two of only three structural enforcements of the cross-lane rule — everything else is
-exhortation, "and exhortation has failed eight times." **Generalising that refusal from *lane* to
-*the full key* is the change.**
-
 ⚠ **Honest labelling: the schema is STRUCTURAL — a setting is a row or it is not. `compare()`
 refusing is STRUCTURAL. Choosing to call `compare()` instead of writing SQL is EXHORTATION**, and the
 only proxy is that the analysis tools expose no raw-query path for a ranking question.
@@ -1581,7 +1370,7 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 - ⚠⚠ **NO DECODE-SUPPORT TABLE.** *"Probe the device; do not write down what each card decodes."* A
   list is a snapshot — it goes stale and becomes the thing people read instead of the thing they run,
   and the library is not static either. The probe keys on the **input**, one frame, per codec,
-  reading **stderr**. This repo has already published a capability table read off the wrong driver.
+  reading **stderr**. A capability table read off the wrong driver has been published once already.
   ⚠ **Encode support is different**: a card has an AV1 encoder or it does not, and that is
   `encoder_unit` itself, with `host_unit` saying where each unit lives. Routing reads that; the
   measurement key does not.
@@ -1595,7 +1384,7 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
   to the class with its reason in the history, or a `k of n` label on the verdict — never a silent
   narrowing, and never an authored list restating something the decode probe measures.
 - ⚠⚠ **NO LANE ENUMERATED BY A FACTOR THE FLOW DOES NOT BRANCH ON.** A lane ships one value; a
-  lane that would ship the same value twice is not two lanes. `any` in `Coverage` is right — the
+  lane that would ship the same value twice is not two lanes. `any` in a lane's predicate is right — the
   flow takes any width — and what it compresses is the sample. The frame uncompresses it, one
   stratum to one window, and a stratum that wants a different setting is the only measured
   reason to add a lane.
@@ -1618,7 +1407,7 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 
 ---
 
-## What this makes checkable that is not checkable today
+## What this makes checkable
 
 - a shipped value is a **rung on its codec's ladder** — both are data
 - a shipped value's **evidence resolves to rows containing it**, not merely to a file that exists
@@ -1649,6 +1438,7 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 | `x_run_outside_class` | a run that covered a window outside its declared class |
 | `x_cell_outside_run_coverage` | a cell on a window its run never declared covering |
 | `x_setting_value_outside_enum` | a cell_setting value outside the setting's enumeration |
+| `x_cell_anchor_outside_range` | a cell whose quality anchor lies outside the setting's declared range -- a target past the encoder's range is UNREACHABLE, never a cell |
 | `x_cut_chain_not_a_served_lane` | a reference cut built with the chain of a lane its class does not serve |
 | `x_member_without_reference_cut` | a class member with no reference cut in the class's reference set |
 | `x_class_serves_no_lane` | a class that serves no lane |
@@ -1684,9 +1474,9 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 | `x_arms_with_disjoint_bitrate_spans` | locate arms whose bitrate spans do not intersect on a window -- widen the locate sweep |
 | `strata_covered` (script) | every inventory or quantile stratum has >= min_windows members satisfying its definition, and every character stratum has >= min_windows members carrying it |
 | `measured_config_was_measured` (script) | a `measured` shipped row's identity settings equal some cell's identity settings, on the shipped unit, in the evidence class |
-| `cells_match_an_arm` (script) | every cell in a run that executes a search has identity settings equal, minus the anchor, to exactly one of the search's arms |
+| `cells_match_an_arm` (script) | every cell in a run that executes a search has identity settings equal, minus the anchor, to one of the search's arms -- exactly one base or candidate, or else the incumbent alone -- so no cell is orphaned and no two swept arms share a configuration |
 | `incumbent_viewing_matches_arm` (script) | the acceptance viewing an incumbent arm names viewed an encode whose identity settings equal the arm's plus its pinned anchor |
-| `shipping_arm_ladder_complete` (script) | the arm that ships has every rung of the codec ladder encoded on every member of the class, so any rung that ships was measured |
+| `shipping_arm_ladder_complete` (script) | the arm that ships has every rung of the codec ladder inside the anchor's range encoded on every member of the class, so any rung that ships was measured; a rung past the range is UNREACHABLE, not missing |
 | `incumbent_arm_scored` (script) | an incumbent arm is encoded at its pinned anchor on every member of the class and scored at the search's height, so the bar the incumbent rule reads was measured on this class and unit; the cell may be the base arm's |
 | `content_rate_meets_floor` (script) | content minutes per wall minute per (lane, host) at the shipped setting and worker count meets the lane's floor; a floor with no timing behind it is UNMEASURED, not unchanged |
 | `tags_complete` (script) | every table carries @group, @class and @writer; FILE means a person wrote it; one writer per table |

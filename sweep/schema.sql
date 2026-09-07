@@ -1,8 +1,8 @@
--- harness/schema.sql -- THE DATA MODEL, in the form SQLite can load.
+-- sweep/schema.sql -- THE DATA MODEL, in the form SQLite can load.
 --
 -- This file is the source. DATA-MODEL.md keeps the argument (THE KEY, THE SAMPLE, the stage
 -- matrix, the rules, the absences); its schema blocks, diagrams, writers list and check list
--- are RENDERED from this file by `python3 harness/model_check.py --render`, and `--check`
+-- are RENDERED from this file by `python3 sweep/model_check.py --render`, and `--check`
 -- fails when they are stale. Edit here, never in the rendered blocks.
 --
 -- Tags on every table, read by model_check.py:
@@ -362,7 +362,7 @@ CREATE TABLE run_event (                                    -- append-only trans
   run_id TEXT NOT NULL REFERENCES run,
   at     TEXT NOT NULL,
   state  TEXT NOT NULL CHECK (state IN ('planned','launched','running','complete','failed','abandoned')),
-  detail TEXT,                                              -- the launch command, the sha on both ends, the failure
+  detail TEXT,                                              -- the claim and the artifact the agent reported, the failure
   PRIMARY KEY (run_id, at, state)
 ) STRICT;
 
@@ -428,7 +428,7 @@ CREATE TABLE score (                                        -- ONE-TO-MANY: heig
   metric    TEXT NOT NULL CHECK (metric IN ('ssimulacra2','butteraugli','vmaf','cambi','psnr_y','float_ssim')),
   statistic TEXT NOT NULL CHECK (statistic IN ('mean','p5','min','max')),
   value     REAL NOT NULL,
-  recipe    TEXT NOT NULL,                                 -- the named scoring recipe (FILL-A-CELL, S1): scaler, options, pooling
+  recipe    TEXT NOT NULL,                                 -- the named scoring recipe (SPEC.md, S1): scaler, options, pooling
   scorer_build TEXT NOT NULL,                              -- the binaries: FFVship version and the ffmpeg build sha
   PRIMARY KEY (cell_key, height, metric, statistic, recipe, scorer_build)
 ) STRICT;
@@ -775,6 +775,13 @@ CREATE VIEW x_setting_value_outside_enum AS
     FROM cell_setting cs JOIN setting s ON s.setting_id = cs.setting_id AND s.value_type = 'enum'
    WHERE NOT EXISTS (SELECT 1 FROM setting_enum_value e WHERE e.setting_id = cs.setting_id AND e.value = cs.value);
 
+-- @check a cell whose quality anchor lies outside the setting's declared range -- a target past the encoder's range is UNREACHABLE, never a cell
+CREATE VIEW x_cell_anchor_outside_range AS
+  SELECT cs.cell_key, cs.setting_id, cs.value, s.range_lo, s.range_hi
+    FROM cell_setting cs JOIN setting s ON s.setting_id = cs.setting_id AND s.kind = 'quality_anchor'
+   WHERE (s.range_lo IS NOT NULL AND CAST(cs.value AS REAL) < s.range_lo)
+      OR (s.range_hi IS NOT NULL AND CAST(cs.value AS REAL) > s.range_hi);
+
 -- @check a reference cut built with the chain of a lane its class does not serve
 CREATE VIEW x_cut_chain_not_a_served_lane AS
   SELECT c.cut_id, c.chain_lane
@@ -957,8 +964,8 @@ CREATE VIEW x_verdict_without_cells AS
 CREATE VIEW x_encode_short_of_frames AS
   SELECT e.cell_key, e.frames, k.frames AS cut_frames
     FROM encode e JOIN cell c ON c.cell_key = e.cell_key
-    JOIN run r ON r.run_id = c.run_id JOIN search s ON s.search_id = r.search_id
-    JOIN content_class cc ON cc.content_class_id = s.content_class_id
+    JOIN run r ON r.run_id = c.run_id                        -- through the run's class, not its search: screen and viewing runs have none
+    JOIN content_class cc ON cc.content_class_id = r.content_class_id
     JOIN cut k ON k.reference_set_id = cc.reference_set_id AND k.window_id = c.window_id AND k.kind = c.cut_kind
    WHERE e.frames <> k.frames;
 

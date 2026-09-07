@@ -28,16 +28,18 @@ laptop                       nas-01 (always on)                       GHCR      
   at plan time; an agent executes what it is given and composes no flags. Verdicts (V1), N\* (T1),
   BD-rate (R1), inversion and categorisation are computed in the hub over the store, never on a node.
 - **Scoring is a run.** `run.stage` gains `score`; a score run has `parent_run_id` and no cells of
-  its own, so a 10-hour job has the same state machine as an encode.
+  its own, so a 10-hour job has the same state machine as an encode. Its `score` and `step_trace`
+  rows name it, so two scorers with one build never collide.
 - **A host is a runtime; a machine may hold several.** `host.machine` groups them and the quiet-box
   rule is per machine: `media-01` (encode container, both units) and `media-01-score`; `htpc-01`;
   `eta` (native) and `eta-wsl` (score container). `host.local_view` says how one runtime sees
   another's work root on the same machine, so eta's own cells are scored through `/mnt/d` with no
   copy.
-- **A scorer is a catalogue row**: `scorer(host, ffvship, score_ffmpeg, metric_backend, gpu_id)`.
-  media-01-score and eta-wsl run the same node-score image — FFVship 5.1.0 CUDA and `libvmaf_cuda`
-  from the linux64 jellyfin-ffmpeg build — so their `scorer_build` is identical and only the GPU
-  differs.
+- **A scorer is a catalogue row**: `scorer(host, ffvship, score_ffmpeg, metric_backend, gpu_id,
+  cache_dir)`, intent only; the build it ran is observed per run. media-01-score and eta-wsl run the
+  same node-score image — FFVship 5.1.0 CUDA and `libvmaf_cuda` from the linux64 jellyfin-ffmpeg
+  build — so their `scorer_build` is identical and only the GPU differs, which is why a score row
+  names its run.
 
 ### The images and the artifact
 
@@ -64,13 +66,18 @@ Each lands with fixture rows, a mutation case and a DDL refusal.
 | change | why |
 |---|---|
 | `chain` keyed `(lane, host, encoder_unit_id)`; `cut.chain_unit`; `x_shipped_without_chain` joins on the unit | media-01 holds two units of different frontends and the filter graph is per API |
-| `run.stage` + `score`; `run.parent_run_id`; `x_score_run_without_parent`; a score run's `run_window` copies its parent's; `v_run_progress` counts a score run over its parent's cells; `x_run_unit_not_on_host` exempts score runs | scoring gets run state |
-| `x_two_active_runs_on_a_host` → `x_timing_run_not_alone`, per `host.machine`: a `time`/`concurrency`/`split` run active on a machine with any other active run | quiet box for timing only |
-| `x_supported_lane_not_routed` scoped to lanes with at least one `shipped` row | it fired on every store before Stage 11 ever ran |
-| the mandatory path skips a codec-ladder rung outside the anchor's range on the unit (`setting.range_hi` via `setting_scope`) and reports it UNREACHABLE; `shipping_arm_ladder_complete` requires in-range rungs only | the AV1 ladder runs to 60 and `av1_qsv` ends at 51 |
-| `scorer` (reference, FILE): host, `ffvship` argv, `score_ffmpeg` argv, `metric_backend ∈ {libvmaf, libvmaf_cuda}`, `gpu_id`, `cache_dir`; a score run's host must have a scorer row | scoring on more than one host |
-| `scorer_equivalence` (measurement, ROW, `@writer equivalence`): run_a, run_b, metric, statistic, cells, max_abs_delta, `exact`; `x_search_mixed_scorers_without_equivalence`: a search whose score rows carry two `scorer_build`s with no equivalence marked `exact` for `ssimulacra2` and `butteraugli` | parallel scoring across scorers only where the instruments are proven the same |
+| `run.stage` + `score`; `run.parent_run_id`; `x_score_run_without_parent`; a score run's `run_window` copies its parent's; `score.run_id` and `step_trace.run_id` in the primary key, so `v_run_progress` counts a score run's own rows against its parent's cells and two scorers with one build never collide; `x_run_unit_not_on_host` exempts score runs | scoring gets run state, and a score row names the run that made it |
+| `x_two_active_runs_on_a_host` → `x_timing_run_not_alone`, per `host.machine`: a `time`/`concurrency`/`split` run active on a machine with any other active run; enforced at enqueue and again at claim, so a queued timing run is not handed out until its machine is quiet | quiet box for timing only |
+| `x_supported_lane_not_routed` scoped to lanes with at least one `shipped` row; `render --check` keeps the completeness rule over the whole case set | it fired on every store before Stage 11 ever ran |
+| the mandatory path skips a codec-ladder rung outside the anchor's declared range (`setting.range_lo`/`range_hi`, the frontend's limit) and reports it UNREACHABLE; the store refuses a cell past it (`x_cell_anchor_outside_range`) and `shipping_arm_ladder_complete` requires in-range rungs only | the AV1 ladder runs to 60 and `av1_qsv` ends at 51 |
+| `scorer` (reference, FILE): host, `ffvship` argv, `score_ffmpeg` argv, `metric_backend ∈ {libvmaf, libvmaf_cuda}`, `gpu_id`, `cache_dir` — intent only, nothing observed; a score run's host must have a scorer row, and the build it ran is `run.scorer_build`, from the artifact the agent reports | scoring on more than one host, without a FILE row that goes stale on an image bump |
+| `scorer_equivalence` (measurement, ROW, `@writer equivalence`): run_a, run_b, metric, statistic, cells, max_abs_delta, `exact`, computed over the two score runs' own rows; `x_search_mixed_scorers_without_equivalence`: a search whose score rows carry two `scorer_build`s with no equivalence marked `exact` for `ssimulacra2` and `butteraugli` | parallel scoring across scorers only where the instruments are proven the same |
 | `host.machine`, `host.local_view`, `host.share_root`; a `nas-01` host row with no units; `run.artifact`; `run_event.by ∈ {hub, agent}` | runtimes on one machine; the share per host; a plan and an agent agree on the code that ran; events say who wrote them |
+| `run.stage` + `materialise`, `verify`, `inventory`; `run.encoder_unit_id` NULL only for `verify` and `inventory` (a CHECK ties it to the stage); `x_run_unit_not_on_host` exempts them | materialise runs the chain on a node's GPU, verify hashes frames on every host, inventory scans the library where it is mounted: all three are runs the queue hands out, and none is a search |
+| `admissibility_verdict` (measurement, ROW, `@writer screen`): unit, `test ∈ {opens, monotone, obeys_rate}`, window, base setting and value, verdict, reason, its cells; `x_search_mode_not_admissible`: a search whose anchor's mode lacks an admissible `opens` and `monotone` verdict on its unit | Stage 1's tests 1, 3 and 6 are refusals the store holds, and Stages 2 and 10 refuse against them |
+| `timing.frames` NOT NULL; `x_timing_short_of_frames` against the cut | a null-terminated leg processes zero frames and exits 0; a leg is verified by frame count, per leg |
+| `encode.kept` is flipped by ingest on the score record — the one column with a second writer, and the schema names it | scoring discards the encode; the fact is written where the discard is decided |
+| the legacy tables `import-legacy` fills are not designed here; they land at M3 as a migration | the acceptance comparison needs the archived values in the store, and none of the record's own tables may hold them |
 
 ### The verbs — `sweep <verb>`, each an endpoint
 
@@ -84,36 +91,47 @@ contract, exported to `record/openapi.json`.
 `local_view`) · `add-unit` (encoder_unit + its `host_unit`: `--host --device` by PCI path; a render
 node is refused by the DDL) · `add-concept` · `add-setting` (+ enum values, roles, per-unit scope) ·
 `add-lane` (+ steps) · `add-constant` (a `measured` constant takes no value; `policy` needs
-`--reason`) · `add-ladder` (+ rungs) · `author-chain` (`--lane --host --unit --vf-template`) ·
-`add-scorer` (the build strings come from the agent's `identify`, never typed) · `set-floor`. Every
-write to a FILE table is a verb's endpoint; `lane` and `search` each have an add verb and one
-update verb (`set-floor`, `set-shipping-arm`).
+`--reason`; `--scope` names the lanes it admits) · `add-ladder` (+ rungs) · `author-chain`
+(`--lane --host --unit --vf-template`) · `add-scorer` (host, backend, GPU, cache dir, tool paths —
+intent; the build is never typed and never stored here: it is what the agent's `identify` reports
+on each run) · `set-floor` · `block-host --fix` / `unblock-host`. Every write to a FILE table is a
+verb's endpoint; `lane`, `host` and `search` each have an add verb and update verbs (`set-floor`,
+`block-host`/`unblock-host`, `set-shipping-arm`).
 
 **Sample and decision**: `pin-window` (a pinned window with a cut is never re-scanned) ·
-`define-class` (refuses a stratum with no member) · `record-viewing` (refuses a discarded encode) ·
-`author-search` (base arm; candidates only with a HONOURED verdict on a member; the incumbent pinned
-at `--anchor` and naming its acceptance viewing; targets naming theirs; the height a served lane's)
-· `set-shipping-arm` · `exclude-route` · `ship` (every DDL check, `measured_config_was_measured`,
+`classify-cut --reason` (the `classified` `cut_check` row: the result is a row, the reason is
+authored) · `define-class` (refuses a stratum with no member) · `record-viewing` (refuses a
+discarded encode) · `author-search` (base arm; the coarse ladder for the locate pass; candidates
+only with a HONOURED verdict on a member; the incumbent pinned at `--anchor` and naming its
+acceptance viewing; targets naming theirs; the height a served lane's) · `set-shipping-arm` ·
+`exclude-route` · `ship` (every DDL check, `measured_config_was_measured`,
 `content_rate_meets_floor`, rung on the ladder, chain exists) · `calibrate --lane --title`
 (HEADROOM's full-length encode) / `--from-run` (RUNG_FACTOR, BOUND, HOST_THRESHOLD; no value flag).
 
 **Mechanical** (plan → enqueue → wait → ingest, all inside the hub; the count is `len(cells)`):
-`inventory` · `materialise [--adopt]` (adopt registers existing cuts by content hash; a differing
-hash is refused; then distributes the reference set to every host that needs it) · `verify` ·
-`screen` · `locate` · `derive-ladders` · `encode [--stage viewing]` · `score --run [--scorer host]
-[--keep] [--concurrency N]` (height is the search's; no height flag exists; the scorer defaults to
+`inventory` (a run on a host that mounts the library; the agent posts `title` records) ·
+`propose-window --title` (recipe W1 on a node: prints the candidate `ss` and its score; nothing is
+written until `pin-window`) · `materialise [--adopt]` (a run on the host whose chain builds the
+cuts; adopt registers existing cuts by content hash; a differing hash is refused; then distributes
+the reference set to every host that needs it) · `verify` (a run per host: the content hash and the
+content checks) · `screen` · `locate` · `derive-ladders` · `encode [--stage viewing]` ·
+`score --run [--scorer host] [--keep] [--concurrency N]` (height is the search's; no height flag exists; the scorer defaults to
 the same machine's scorer; refuses a scorer whose build lacks its backend's filter, a reference cut
 absent or differing there, a second scorer on a search without an exact equivalence; publishes
 encodes to the share when the scorer is on another machine) · `equivalence --search --scorers a,b
 [--arms …]` (the same cells on both with `--keep`; per-frame identity for the FFVship metrics, per
 statistic for libvmaf; writes `scorer_equivalence`) · `time [--workers 1,2,3,4] [--split]` ·
-`probe --lane --unit --host --title` · `watch --run` (follows; never launches) · `abandon --run
---reason`.
+`probe --lane --unit --host --title` (its slices are the one machine-written rows of `window`,
+`origin = generated`) · `watch --run` (follows; never launches) · `abandon --run --reason`.
 
 **Read-only**: `check` · `status` (answers from the hub's state; a silent agent is reported silent,
 so a downed node cannot kill it) · `rank` · `categorise` · `invert` · `render [--check]` (the build
-order's generated regions, recipe E1, written into the campaign repo by the CLI) · `export` · `import-legacy`
-· `compare-legacy`.
+order's generated regions, recipe E1, written into the campaign repo by the CLI; `--check` also
+refuses a `(lane, host, step)` with neither a shipped row nor an exclusion — the completeness rule
+`x_supported_lane_not_routed` no longer carries for unshipped lanes) · `export` · `compare-legacy`.
+
+**Legacy**: `import-legacy` writes the archived values into the legacy tables M3 adds — a store
+write, and a differing existing row is refused.
 
 ### The control plane — the hub's agent API, Redis behind it, the share beside it
 
@@ -121,7 +139,7 @@ Agents speak REST to the hub and nothing else; the hub is the only Redis client.
 
 | endpoint | who | semantics |
 |---|---|---|
-| `POST /agents/{host}/claim` (long-poll, 30 s) | agent | the hub reads the host's queue (`XREADGROUP` on `harness:queue:{host}`, consumer = host, one entry) and returns the run: the plan inline, the artifact it was built for, share and work paths in the host's spelling; a restart returns the agent's own pending entry first (`XAUTOCLAIM`); a resume is idempotent because a cell with a record is skipped |
+| `POST /agents/{host}/claim` (long-poll, 30 s) | agent | the hub reads the host's queue (`XREADGROUP` on `harness:queue:{host}`, consumer = host, one entry) and returns the run: the plan inline, the artifact it was built for, share and work paths in the host's spelling; a restart returns the agent's own pending entry first (`XAUTOCLAIM`); a resume is idempotent because a cell with a record is skipped; the claim posts `launched`; a timing run is handed out only while its machine is quiet, and waits in the queue otherwise |
 | `POST /agents/{host}/heartbeat` | agent, every 30 s | `{run_id, cells_done, cells_total, artifact, identity}` with a 90 s TTL; the hub hands a run only to an agent whose artifact and identity agree with the plan and the catalogue |
 | `POST /runs/{id}/events` | agent and hub | `{at, state, detail, by}`; appended to the run's stream and to `run_event`; `run.state` is the last event |
 | `POST /runs/{id}/records` | agent | one record per cell as it completes; ingested at once, so progress is the store's own count; a record posted twice is idempotent |
@@ -166,19 +184,20 @@ detached-process flags, no busy probe, no per-OS counting, no file transfer by t
 `agent.py` (`serve`: read the hub URL, token, host name and paths from its config; long-poll
 `claim`; per run: pull inputs, verify shas, refuse a plan for another artifact, run the cells one
 job at a time, heartbeat, post each record as it completes, post events, ack; `identify`;
-`hash <paths>`; `httpx` for the API, dependencies declared in the `node` extra) · `ffm.py` (subprocess,
-`-progress` parsing requiring `progress=end`, framemd5 content hash and frame count, decode probe
-reading stderr signatures, tool versions with the ffmpeg sha computed inside the container) ·
-`scoring.py` (recipe S1 exactly; the reference rescaled once per (cut, geometry) and released;
-FFVship per-frame values pooled by nearest rank; libvmaf one pass, input 0 distorted; the CUDA graph
-when `metric_backend` is `libvmaf_cuda`, the plain graph otherwise; the three metric steps through
-`pool.run_all`) · `timing.py` (recipe T1; workers each with their own progress dir; NAS warm only
-for library titles; legs executed as given) · `pool.py` (concurrency handled once: join every
-future, raise the first error in submission order) · `records.py` (atomic writes, nothing
-overwritten). Records: `encode` (bytes, frames, out_time, bitrate, decode_path, rc, or a failure
-with stderr), `score` (pooled statistics, per-step seconds, scorer versions; per-frame arrays
-uploaded separately and kept by the hub beside the store, outside the export), `timing` (samples
-with `is_warmup`).
+`hash <paths>`; `httpx` for the API, dependencies declared in the `node` extra) · `ffm.py`
+(subprocess, `-progress` parsing requiring `progress=end`, framemd5 content hash and frame count,
+decode probe reading stderr signatures, the W1 scan (`signalstats` and `scdet` at 1 Hz), tool
+versions with the ffmpeg sha computed inside the container) · `scoring.py` (recipe S1 exactly; the
+reference rescaled once per (cut, geometry) and released; FFVship per-frame values pooled by nearest
+rank; libvmaf one pass, input 0 distorted, with the argv the plan carries — the CUDA or the plain
+graph is the builder's choice from the scorer's `metric_backend`, never the node's; the three metric
+steps through `pool.run_all`) · `timing.py` (recipe T1; workers each with their own progress dir;
+NAS warm only for library titles; legs executed as given) · `pool.py` (concurrency handled once:
+join every future, raise the first error in submission order) · `records.py` (atomic writes,
+nothing overwritten). Records: `encode` (bytes, frames, out_time, bitrate, decode_path, rc, or a
+failure with stderr), `score` (pooled statistics, per-step seconds, scorer versions; per-frame
+arrays uploaded separately and kept by the hub beside the store, outside the export), `timing`
+(samples with `is_warmup`, and the frame count per leg).
 
 ### Data formats
 
@@ -191,8 +210,8 @@ with `is_warmup`).
   roles, argv, output, keep, repeats, workers, legs) · `exchange` (which outputs to publish). A
   score job names the height, geometry, references and cells, and where each encode is pulled from.
 - **Ingest** maps records to `encode`/`cell_failure`, `score` rows (`ssimulacra2` mean·p5·min,
-  `butteraugli` max, `vmaf`/`cambi`/`psnr_y`/`float_ssim` mean, `recipe`, `scorer_build`),
-  `step_trace`, `timing`; derived tables (`setting_verdict`, `arm_ladder_rung`, `constant_value`) are
+  `butteraugli` max, `vmaf`/`cambi`/`psnr_y`/`float_ssim` mean, `recipe`, `scorer_build`, under the
+  score run), `step_trace`, `timing`; derived tables (`setting_verdict`, `arm_ladder_rung`, `constant_value`) are
   written by the hub's own verbs.
 - **The export** (the campaign repo's `record/`): `authored/<table>.json`, `runs/<id>/plan.json`,
   `runs/<id>/events.jsonl`, `runs/<id>/records/*.json`, `constants.json`, `openapi.json` —
@@ -212,12 +231,12 @@ with `is_warmup`).
 | `sweep/hub/queue.py` | `Queue`, `RedisQueue` (streams, consumer groups, heartbeat TTLs, pub/sub), `FakeQueue` |
 | `sweep/hub/exchange.py` | the share in each host's spelling; the hub's bind-mounted view; `publish`/`pull` with sha both ends |
 | `sweep/hub/artifact.py` | records the artifact each agent reports (image digest, or package version and sha) and pins it into plans |
-| `sweep/hub/analysis.py` | rank (per window `bd_rate` over the shared range → median, k of n, per stratum), categorise (per decode path, UNMEASURED), invert on `lane.decision_rule` (tightest straddling pair, from `analyze.py:324`), content rate, screen verdicts, `derive_ladders` (from `settings_search.py:299 locate_ladders`), calibrate (BOUND from `m4_routing.py:57-102`), equivalence, the comparison primitive |
+| `sweep/hub/analysis.py` | rank (per window `bd_rate` over the shared range → median, k of n, per stratum), categorise (per decode path, UNMEASURED), invert on `lane.decision_rule` (tightest straddling pair, from `analyze.py:324`), content rate, screen and admissibility verdicts, `derive_ladders` (from `settings_search.py:299 locate_ladders`), calibrate (BOUND from `m4_routing.py:57-102`), equivalence, the comparison primitive |
 | `sweep/hub/render.py`, `sweep/hub/legacy.py`, `sweep/hub/export.py` | E1; `import-legacy` and `compare-legacy` (the campaign repo's committed CSVs, uploaded by the CLI); the deterministic export |
 | `sweep/cli/__main__.py` | `sweep`: one subparser per verb, `httpx` to the hub, prints replies, exits 1 on `REFUSING`; `export`, `render` write into the campaign repo; run as `uvx --from git+…@<tag> sweep` or `uv tool install` |
 | `sweep/node/{agent,ffm,scoring,timing,pool,records}.py` | above; the same package in both node images and, via `uvx`, natively on eta |
 | `sweep/schema.sql`, `sweep/model_check.py` | unchanged in role: the schema is the source, the proof and the doc rendering stay |
-| `docker/Dockerfile.hub`, `docker/Dockerfile.node-encode`, `docker/Dockerfile.node-score` | the images above; `requirements-hub.txt` is the only place third-party packages are pinned |
+| `docker/Dockerfile.hub`, `docker/Dockerfile.node-encode`, `docker/Dockerfile.node-score` | the images above; `uv.lock` is the only place third-party packages are pinned, and every image installs from it |
 | `.github/workflows/ci.yaml`, `images.yaml` | tests + `model_check --mutate` + docs `--check` + integration against a Redis service; build and push the three images to GHCR on main and tags (the FFVship CUDA build stage cached); a tag is the unit of deployment for images and for `uvx` alike |
 
 Lifted verbatim from the archived harness, cited at the call site: `parse_progress` (`sweep.py:1013`), `nearest_rank`
@@ -247,15 +266,19 @@ only when a policy asks; by default they never do. **Cross-cell concurrency on e
 
 ### How the `by_construction` class stays closed
 
-No endpoint takes a count, a device, a directory, a height or a card name as free input: the count
-is `len(cells)`; the device comes from `host_unit`; the height from `search.score_height`; the unit
-from the run row; nothing but the API can write the store; an agent runs only what its claim hands
-it, for the artifact the plan names. The table below carries one row per refusal
-id; `test_refusals.py` asserts every `by_construction` id appears in that table and that no field
-named `count`, `device`, `height` or `directory` exists on any request body in the OpenAPI document.
+No mechanical or record endpoint takes a count, a device, a directory, a height or a card name as
+free input: the count is `len(cells)`; the device comes from `host_unit`; the height from
+`search.score_height`; the unit from the run row; nothing but the API can write the store; an agent
+runs only what its claim hands it, for the artifact the plan names. The catalogue verbs are where
+those are authored once — `add-unit --device`, `add-host`'s roots, `add-scorer`'s cache dir. The
+table below carries one row per refusal id; `test_refusals.py` asserts every `by_construction` id
+appears in that table and that no request body outside the catalogue router carries a field named
+`count`, `device`, `height`, `directory` or `root` in the OpenAPI document. Honest labelling: the
+name test proves those words are absent from the mechanical bodies, not that no free input of those
+kinds exists; the by-construction claim rests on the verbs' shapes above.
 
-The other twenty-five refusals are not closed here: `check` ones are `x_*` views the store runs on
-every write, and `process` ones are rules a stage applies. This table is only the class the shape
+The other twenty-five refusals are not closed here: `check` ones are `x_*` views or script checks the
+store runs on every write, and `process` ones are rules a stage applies. This table is only the class the shape
 itself makes impossible.
 
 **`identity_and_provenance`**
@@ -263,9 +286,9 @@ itself makes impossible.
 | refusal | what it protects | why it cannot happen |
 |---|---|---|
 | `id-no-cross-card-fallback` | identity never falls back to another card's tool | the unit is `run.encoder_unit_id`, taken from the catalogue at plan time; an agent reports its identity but never names a unit, and `x_run_unit_not_on_host` keeps it in its box |
-| `id-device-by-slot` | the card is addressed by PCI slot | `host_unit.device` is written once by `add-unit` and read by the builder; no request body and no plan carries a device, and the DDL refuses a render-node number |
+| `id-device-by-slot` | the card is addressed by PCI slot | `host_unit.device` is written once by `add-unit` — the one body that carries a device — and read by the builder; no mechanical body and no plan carries one, and the DDL refuses a render-node number |
 | `id-record-matches-profile` | a record written for another node is refused | a record is posted against the run that was claimed and ingested under its unit by foreign key; there is no file to mis-attribute |
-| `id-scorer-in-the-key` | the metric backend is part of the scorer's identity | `add-scorer` takes the build strings from the agent's `identify`, never typed, and `score`'s primary key carries `scorer_build` |
+| `id-scorer-in-the-key` | the metric backend is part of the scorer's identity | the scorer row is intent; the build is observed — `run.scorer_build` from the agent's `identify`, never typed — and `score`'s primary key carries `scorer_build` and the run |
 | `id-scoping-reaches-every-builder` | scoping reaches every command builder | `sweep/hub/build.py` is the one builder and it reads `host` and `host_unit`; an agent composes no flags, so there is no second builder to miss |
 | `id-a-constant-says-how-its-value-was-decided` | a constant carries the provenance of its value | `add-constant` refuses a value on a `measured` constant and a `policy` one without `--reason`; `calibrate` is the only writer of `constant_value`; `x_measured_constant_never_calibrated` |
 
@@ -328,8 +351,8 @@ Modules are named, never discovered. Above that:
   so every verb, every refusal and every ingest path is covered without a container.
 - **Every refusal has a test that names it**, and `test_refusals.py` asserts coverage against
   `refusals.json`: every `by_construction` id appears in the table above, every `check` id maps to an
-  `x_*` view the model proves, and no request body carries a `count`, `device`, `height` or
-  `directory` field in the OpenAPI document.
+  `x_*` view or a script check the model proves, and no request body outside the catalogue router
+  carries a `count`, `device`, `height`, `directory` or `root` field in the OpenAPI document.
 - **The integration suite** exercises `RedisQueue`, the agent protocol and the exchange against a
   Redis service container — in CI on every push, locally under `make integration` with Docker.
 - **Mutation checking**: a suite that cannot fail on a deliberate break is not evidence.
@@ -338,8 +361,10 @@ Modules are named, never discovered. Above that:
 
 The harness is accepted when it reproduces the campaign's committed values, not when its tests pass.
 
-1. `import-legacy` loads the archived harness's committed CSVs for the B580 `av1_qsv` column;
-   `materialise --adopt` registers the existing cuts by content hash and refuses a differing one.
+1. `import-legacy` loads the archived harness's committed CSVs for the B580 `av1_qsv` column into
+   the legacy tables (M3); the row set compared is fixed before the run, and the rows of an arm the
+   search excluded are compared or refused by name, never dropped. `materialise --adopt` registers
+   the existing cuts by content hash and refuses a differing one.
 2. The same cells are re-encoded and re-scored under recipes S1 and K1 on the same reference pixels.
 3. `compare-legacy` requires **exact** equality for every stored statistic — the scorers are
    bit-deterministic on one GPU, so "the same" means the same number, not a tolerance.

@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "THE REFUSAL INVENTORY. Phase 2 of plans/greenfield-harness-rewrite.md.",
+    "THE REFUSAL INVENTORY: the invariants the harness must preserve, each with the incident behind it.",
     "",
     "Each entry is an INVARIANT the new harness must preserve, not a line of code. They were",
     "collapsed from 240 refusal-shaped sites on the live path (sweep.py 100, encode_run.py 72,",
@@ -48,12 +48,12 @@
      "how": "a verdict row carries its unit by foreign key; there is no file to mis-attribute"},
 
     {"id": "id-scorer-in-the-key",
-     "invariant": "The metric backend is part of the scorer's version string and therefore of the cell key.",
+     "invariant": "The metric backend is part of the scorer's version string, and a score row carries that string, so two backends never read as one measurement.",
      "prevents": "Two cells scored on different metric backends comparing as though they were the same measurement.",
      "today": ["sweep.py:2239", "sweep.py:5349"],
      "test": "Changing the metric backend changes the cell key.",
      "disposition": "by_construction",
-     "how": "`scorer.metric_backend` is part of the build strings `add-scorer` takes from the agent's `identify`, and `score`'s primary key carries `scorer_build`; K1 deliberately excludes it, so a re-score under another scorer is a new row, not a collision"},
+     "how": "`scorer.metric_backend` is authored intent; the build that ran is `run.scorer_build`, from the agent's `identify` and never typed, and `score`'s primary key carries `scorer_build` and the run; K1 deliberately excludes the scorer, so a re-score under another scorer is a new row, not a collision"},
 
     {"id": "id-scoping-reaches-every-builder",
      "invariant": "Host/backend scoping must reach EVERY command builder, and the set is discovered by introspection, not listed by hand.",
@@ -95,7 +95,7 @@
      "today": ["sweep.py:2418"],
      "test": "An invocation that fails to launch raises rather than returning a capability verdict.",
      "disposition": "check",
-     "how": "`x_verdict_without_cells`: a verdict must name the encodes behind it"},
+     "how": "`x_verdict_without_cells`: a verdict must name the encodes behind it; and the agent's decode probe raises on an invocation that did not run, so no capability verdict comes from an empty stderr"},
 
     {"id": "adm-count-frames-not-status",
      "invariant": "A leg or stage is verified by FRAME COUNT, never by exit status.",
@@ -341,15 +341,15 @@
      "today": ["tools/encode_run.py:2358", "tools/encode_run.py:1797"],
      "test": "The launch returns before the job ends, and the waiter is armed by the same call.",
      "disposition": "process",
-     "how": "the launch primitive writes the `launched` event in the same action"},
+     "how": "`enqueue` writes the plan rows, the queue entry and the `planned` event in one transaction, and the claim posts `launched`; there is no detached process to lose"},
 
     {"id": "orc-refuse-a-busy-node",
      "invariant": "Refuse to push or launch onto a node already running the harness.",
      "prevents": "A client-side ssh timeout does not stop a remote job, so a missing stamp is not evidence that nothing is running. Re-launching pushes new code underneath a live run.",
      "today": ["tools/push_node.py"],
-     "test": "A busy node refuses both the push and the launch; re-attach is a separate verb that launches nothing.",
+     "test": "A timing run is not handed to an agent while another run is active on its machine; a second enqueue on a host queues instead of launching; no verb pushes code.",
      "disposition": "check",
-     "how": "`x_two_active_runs_on_a_host`"},
+     "how": "`x_two_active_runs_on_a_host` (becoming `x_timing_run_not_alone`, per machine): a timing run is refused while any other run is active on its machine; the push half is closed by construction -- an agent runs one job at a time and no code is pushed"},
 
     {"id": "orc-prove-the-push",
      "invariant": "After every push, prove arrival by sha on BOTH ends and refuse if they still differ.",
@@ -357,7 +357,7 @@
      "today": ["tools/push_node.py"],
      "test": "A short or altered copy exits non-zero having asserted nothing.",
      "disposition": "process",
-     "how": "the deploy step; the sha on both ends goes into `run_event.detail`"},
+     "how": "nothing is pushed: the plan names the artifact it was built for and the hub hands a run only to an agent whose heartbeat reports it; the exchange shas a transferred file on both ends"},
 
     {"id": "orc-blocked-is-a-refusal-at-the-moment-of-use",
      "invariant": "An unusable host refuses at the moment of use, with the fix in the message.",
@@ -423,7 +423,7 @@
      "today": ["tools/settings_search.py"],
      "test": "Categorisation without a timing table says the speed axis is unmeasured.",
      "disposition": "check",
-     "how": "the content-rate check reports UNMEASURED; Stage 9 does the same"},
+     "how": "`content_rate_meets_floor` (script) reports UNMEASURED; Stage 9 does the same"},
 
     {"id": "search-admissibility-excludes-never-ranks",
      "invariant": "An inadmissible arm is EXCLUDED from the ranking, never placed last in it.",

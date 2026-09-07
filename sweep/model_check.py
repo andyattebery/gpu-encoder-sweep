@@ -282,9 +282,13 @@ INSERT INTO cut_check SELECT cut_id, 'content', 'pass', NULL, '2026-08-26' FROM 
 INSERT INTO search VALUES ('b580-qsv-av1','native-1080p-sdr','intel-b580-ihd26.2.2-qsv-av1','qsv.q',1548,'the first settings search; k = 3 factors, full factorial, preset swept',NULL);
 INSERT INTO arm VALUES ('arm-a','b580-qsv-av1','cqp-preset4-bs0','base',NULL,NULL),('arm-b','b580-qsv-av1','cqp-preset4-bs1','candidate',NULL,NULL),
  ('arm-c','b580-qsv-av1','cqp-preset1-bs0','candidate',NULL,NULL);
+-- the incumbent: what shipped before the search, preset 1 with B-pyramid, pinned at q 30. Its settings equal no other
+-- arm's, so the incumbent checks have a positive instance of the shape that needs its OWN cells (accepted_by_viewing is
+-- set once the viewing exists, below)
+INSERT INTO arm VALUES ('arm-i','b580-qsv-av1','cqp-preset1-bs1-incumbent','incumbent',NULL,'30');
 UPDATE search SET shipping_arm_id = 'arm-a' WHERE search_id = 'b580-qsv-av1';   -- the base ships: no candidate beat it
 INSERT INTO arm_setting VALUES ('arm-a','qsv.preset','4'),('arm-a','qsv.b_strategy','0'),('arm-b','qsv.preset','4'),('arm-b','qsv.b_strategy','1'),
- ('arm-c','qsv.preset','1'),('arm-c','qsv.b_strategy','0');
+ ('arm-c','qsv.preset','1'),('arm-c','qsv.b_strategy','0'),('arm-i','qsv.preset','1'),('arm-i','qsv.b_strategy','1');
 INSERT INTO search_coarse_rung SELECT 'b580-qsv-av1', value FROM (SELECT 12 AS value UNION SELECT 18 UNION SELECT 24 UNION SELECT 30 UNION SELECT 36 UNION SELECT 42);
 INSERT INTO search_target VALUES ('b580-qsv-av1','ssimulacra2','mean',75,NULL),('b580-qsv-av1','ssimulacra2','mean',80,NULL),('b580-qsv-av1','ssimulacra2','mean',85,NULL);
 
@@ -301,7 +305,7 @@ INSERT INTO constant_value VALUES
  ('HEADROOM','m4-calibrate',0.98,'2026-08-28'),('BOUND','m4-calibrate',20,'2026-08-28'),
  ('RUNG_FACTOR','m4-calibrate',0.8374,'2026-08-28'),('HOST_THRESHOLD','m4-calibrate',10.0,'2026-08-28');
 UPDATE run SET state = 'complete', fetched_at = finished_at, verified_at = finished_at;
-INSERT INTO run_event SELECT run_id, started_at, 'launched', 'setsid ... sha ok on both ends' FROM run;
+INSERT INTO run_event SELECT run_id, started_at, 'launched', 'claimed; the agent reports the artifact the plan names' FROM run;
 INSERT INTO run_event SELECT run_id, finished_at, 'complete', 'count and heights verified against the plan' FROM run;
 INSERT INTO run_window SELECT 'b580-qsv-av1', window_id FROM content_class_member WHERE content_class_id = 'native-1080p-sdr';
 INSERT INTO run_window SELECT 'b580-qsv-av1-time', window_id FROM content_class_member WHERE content_class_id = 'native-1080p-sdr';
@@ -322,12 +326,15 @@ INSERT INTO arm_ladder_rung
         (SELECT 18 AS rung UNION SELECT 24 UNION SELECT 30 UNION SELECT 36) r
   WHERE a.role = 'candidate';
 
--- the base arm on EVERY rung of the codec ladder, on every member: the mandatory path (15 x 6 cells);
+-- the base arm on every rung of the codec ladder INSIDE the anchor's range, on every member: the mandatory path
+-- (13 x 6 cells -- qsv.q ends at 51, so the ladder's 55 and 60 are UNREACHABLE on this unit and have no cell);
 -- plus one candidate at two rungs on two windows: the search, when the screen earned it
 INSERT INTO cell SELECT 'c-a' || r.rung || '-' || m.window_id, 'b580-qsv-av1', m.window_id, 'reference'
-  FROM ladder_rung r, content_class_member m WHERE r.ladder_id = 'av1' AND m.content_class_id = 'native-1080p-sdr';
+  FROM ladder_rung r, content_class_member m, setting s
+ WHERE r.ladder_id = 'av1' AND m.content_class_id = 'native-1080p-sdr' AND s.setting_id = 'qsv.q' AND r.rung BETWEEN s.range_lo AND s.range_hi;
 INSERT INTO cell_setting SELECT 'c-a' || r.rung || '-' || m.window_id, 'qsv.q', CAST(r.rung AS TEXT), 'identity'
-  FROM ladder_rung r, content_class_member m WHERE r.ladder_id = 'av1' AND m.content_class_id = 'native-1080p-sdr';
+  FROM ladder_rung r, content_class_member m, setting s
+ WHERE r.ladder_id = 'av1' AND m.content_class_id = 'native-1080p-sdr' AND s.setting_id = 'qsv.q' AND r.rung BETWEEN s.range_lo AND s.range_hi;
 INSERT INTO cell VALUES
  ('c-b24-tng','b580-qsv-av1','tng','reference'),('c-b30-tng','b580-qsv-av1','tng','reference'),
  ('c-b24-parks','b580-qsv-av1','parks','reference'),('c-b30-parks','b580-qsv-av1','parks','reference');
@@ -340,6 +347,13 @@ INSERT INTO cell_setting SELECT cell_key, 'qsv.b_strategy', CASE WHEN cell_key L
 INSERT INTO cell_setting SELECT cell_key, 'qsv.adaptive_b', '-1', 'default_resolved' FROM cell WHERE run_id = 'b580-qsv-av1';
 INSERT INTO encode SELECT c.cell_key, 60000000, 30000.0 - 400.0 * CAST(cs.value AS REAL), 1439, 60.0, 'hardware', 0
   FROM cell c JOIN cell_setting cs ON cs.cell_key = c.cell_key AND cs.setting_id = 'qsv.q' WHERE c.run_id = 'b580-qsv-av1';
+-- the incumbent arm at its pinned anchor on every member (Stage 5): the bar the incumbent rule reads, scored below with the rest
+INSERT INTO cell SELECT 'c-i30-' || window_id, 'b580-qsv-av1', window_id, 'reference' FROM content_class_member WHERE content_class_id = 'native-1080p-sdr';
+INSERT INTO cell_setting SELECT cell_key, 'qsv.q', '30', 'identity' FROM cell WHERE cell_key LIKE 'c-i30-%';
+INSERT INTO cell_setting SELECT cell_key, 'qsv.preset', '1', 'identity' FROM cell WHERE cell_key LIKE 'c-i30-%';
+INSERT INTO cell_setting SELECT cell_key, 'qsv.b_strategy', '1', 'identity' FROM cell WHERE cell_key LIKE 'c-i30-%';
+INSERT INTO cell_setting SELECT cell_key, 'qsv.adaptive_b', '-1', 'default_resolved' FROM cell WHERE cell_key LIKE 'c-i30-%';
+INSERT INTO encode SELECT cell_key, 34000000, 17000.0, 1439, 60.0, 'hardware', 0 FROM cell WHERE cell_key LIKE 'c-i30-%';
 INSERT INTO score SELECT c.cell_key, 1548, 'ssimulacra2', 'mean', 95.0 - 0.5 * CAST(cs.value AS REAL), 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d'
   FROM cell c JOIN cell_setting cs ON cs.cell_key = c.cell_key AND cs.setting_id = 'qsv.q' WHERE c.run_id = 'b580-qsv-av1';
 INSERT INTO score SELECT c.cell_key, 1548, 'ssimulacra2', 'p5', 86.0 - 0.5 * CAST(cs.value AS REAL), 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d'
@@ -377,13 +391,15 @@ INSERT INTO setting_verdict VALUES (3,'intel-b580-ihd26.2.2-qsv-av1','qsv.preset
 INSERT INTO setting_verdict_cell VALUES (1,'s-bs0'),(1,'s-bs1'),(2,'s-ab1'),(2,'s-bs1'),(3,'s-p1'),(3,'s-p4');
 
 -- the viewing: two encodes KEPT for a person to view, and the verdict
-INSERT INTO cell VALUES ('g-a','b580-viewing','tng','reference'),('g-b','b580-viewing','tng','reference');
+INSERT INTO cell VALUES ('g-a','b580-viewing','tng','reference'),('g-b','b580-viewing','tng','reference'),('g-i','b580-viewing','tng','reference');
 INSERT INTO cell_setting VALUES ('g-a','qsv.preset','4','identity'),('g-a','qsv.b_strategy','0','identity'),('g-a','qsv.q','30','identity'),
- ('g-b','qsv.preset','4','identity'),('g-b','qsv.b_strategy','0','identity'),('g-b','qsv.q','34','identity');
-INSERT INTO encode VALUES ('g-a',52000000,6900.0,1439,60.0,'hardware',1),('g-b',44000000,5900.0,1439,60.0,'hardware',1);
+ ('g-b','qsv.preset','4','identity'),('g-b','qsv.b_strategy','0','identity'),('g-b','qsv.q','34','identity'),
+ ('g-i','qsv.preset','1','identity'),('g-i','qsv.b_strategy','1','identity'),('g-i','qsv.q','30','identity');
+INSERT INTO encode VALUES ('g-a',52000000,6900.0,1439,60.0,'hardware',1),('g-b',44000000,5900.0,1439,60.0,'hardware',1),('g-i',36000000,4800.0,1439,60.0,'hardware',1);
 INSERT INTO viewing_verdict VALUES (1,'pair',NULL,'tng','g-a','g-b','iPad M4 13in','andy','same','not worth the size','2026-09-04');
--- an acceptance too, so the discarded-encode check has a positive instance of BOTH kinds on the clean fixture
-INSERT INTO viewing_verdict VALUES (9,'acceptance','m4-ipad-le1080p-sdr','tng','g-a',NULL,'iPad M4 13in','andy','acceptable','the base at q 30 is acceptable for the lane','2026-09-04');
+-- an acceptance too, of the incumbent's own encode: the viewing the incumbent arm names, and a positive instance of BOTH kinds for the discarded-encode check
+INSERT INTO viewing_verdict VALUES (9,'acceptance','m4-ipad-le1080p-sdr','tng','g-i',NULL,'iPad M4 13in','andy','acceptable','what ships today, at q 30, is acceptable for the lane','2026-09-04');
+UPDATE arm SET accepted_by_viewing = 9 WHERE arm_id = 'arm-i';
 
 -- shipping: a measured value on the class, a bitrate-target value computed from a constant,
 -- a derived HEVC value, and a no-content value carried from the SDR lane
@@ -432,11 +448,13 @@ SCRIPT_CHECKS = OrderedDict([
     ("measured_config_was_measured", "a `measured` shipped row's identity settings equal some cell's identity "
                                      "settings, on the shipped unit, in the evidence class"),
     ("cells_match_an_arm", "every cell in a run that executes a search has identity settings equal, minus the anchor, "
-                          "to exactly one of the search's arms"),
+                          "to one of the search's arms -- exactly one base or candidate, or else the incumbent alone -- "
+                          "so no cell is orphaned and no two swept arms share a configuration"),
     ("incumbent_viewing_matches_arm", "the acceptance viewing an incumbent arm names viewed an encode whose identity settings "
                                      "equal the arm's plus its pinned anchor"),
-    ("shipping_arm_ladder_complete", "the arm that ships has every rung of the codec ladder encoded on every member of the "
-                                    "class, so any rung that ships was measured"),
+    ("shipping_arm_ladder_complete", "the arm that ships has every rung of the codec ladder inside the anchor's range encoded "
+                                    "on every member of the class, so any rung that ships was measured; a rung past the range "
+                                    "is UNREACHABLE, not missing"),
     ("incumbent_arm_scored", "an incumbent arm is encoded at its pinned anchor on every member of the class and scored at the "
                              "search's height, so the bar the incumbent rule reads was measured on this class and unit; "
                              "the cell may be the base arm's"),
@@ -492,16 +510,20 @@ def check_measured_configs(conn):
 
 
 def check_cells_match_arms(conn):
+    """A cell in a search run is one arm's: its identity settings minus the anchor equal that arm's. The incumbent's
+    cells count too -- Stage 5 encodes them precisely when its settings equal no base or candidate's -- and a cell
+    equal to the base's and the incumbent's at once is the base arm's, so an incumbent match never makes a surplus."""
     out = []
     for run_id, search_id, anchor in conn.execute(
             "SELECT r.run_id, r.search_id, s.anchor_setting_id FROM run r JOIN search s ON s.search_id = r.search_id"):
-        arms = {arm_id: frozenset(conn.execute("SELECT setting_id, value FROM arm_setting WHERE arm_id = ?", (arm_id,)).fetchall())
-                for (arm_id,) in conn.execute("SELECT arm_id FROM arm WHERE search_id = ? AND role <> 'incumbent'", (search_id,))}
+        arms = {arm_id: (role, frozenset(conn.execute("SELECT setting_id, value FROM arm_setting WHERE arm_id = ?", (arm_id,)).fetchall()))
+                for arm_id, role in conn.execute("SELECT arm_id, role FROM arm WHERE search_id = ?", (search_id,))}
         for (ck,) in conn.execute("SELECT cell_key FROM cell WHERE run_id = ?", (run_id,)):
             have = frozenset(conn.execute("SELECT setting_id, value FROM cell_setting WHERE cell_key = ? AND role = 'identity' "
                                           "AND setting_id <> ?", (ck, anchor)).fetchall())
-            matches = [a for a, s in arms.items() if s == have]
-            if len(matches) != 1:
+            matches = [a for a, (_, s) in arms.items() if s == have]
+            swept = [a for a in matches if arms[a][0] != 'incumbent']
+            if len(swept) > 1 or (not swept and len(matches) != 1):
                 out.append((run_id, ck, matches))
     return out
 
@@ -531,7 +553,9 @@ def check_shipping_arm_ladders(conn):
             continue
         settings = frozenset(conn.execute("SELECT setting_id, value FROM arm_setting WHERE arm_id = ?", (arm,)).fetchall())
         (codec,) = conn.execute("SELECT codec FROM encoder_unit WHERE encoder_unit_id = ?", (unit,)).fetchone()
-        rungs = [r for (r,) in conn.execute("SELECT rung FROM ladder_rung lr JOIN ladder l ON l.ladder_id = lr.ladder_id WHERE l.codec = ?", (codec,))]
+        lo, hi = conn.execute("SELECT range_lo, range_hi FROM setting WHERE setting_id = ?", (anchor,)).fetchone()
+        rungs = [r for (r,) in conn.execute("SELECT rung FROM ladder_rung lr JOIN ladder l ON l.ladder_id = lr.ladder_id WHERE l.codec = ?", (codec,))
+                 if (lo is None or r >= lo) and (hi is None or r <= hi)]   # a rung past the anchor's range is UNREACHABLE, never a cell
         members = [w for (w,) in conn.execute("SELECT window_id FROM content_class_member WHERE content_class_id = ?", (cc,))]
         have = {}
         for ck, w in conn.execute("SELECT c.cell_key, c.window_id FROM cell c JOIN run r ON r.run_id = c.run_id "
@@ -673,31 +697,22 @@ MUTATIONS = [
     ("a pair viewing whose second encode was discarded", "UPDATE encode SET kept = 0 WHERE cell_key = 'g-b'",
      "x_viewing_on_a_discarded_encode"),
     ("an incumbent-bound lane whose search has no incumbent arm",
-     "UPDATE lane SET decision_rule = 'incumbent' WHERE lane = 'm4-ipad-le1080p-sdr'",
+     "UPDATE lane SET decision_rule = 'incumbent' WHERE lane = 'm4-ipad-le1080p-sdr'; "
+     "UPDATE arm SET role = 'candidate', anchor_value = NULL WHERE arm_id = 'arm-i'",
      "x_incumbent_rule_without_incumbent_arm"),
     ("a target-bound lane whose search has no targets",
      "UPDATE lane SET decision_rule = 'target', score_target = 78.1 WHERE lane = 'm4-ipad-le1080p-sdr'; DELETE FROM search_target",
      "x_target_rule_without_targets"),
     ("a measured constant never calibrated", "DELETE FROM constant_value WHERE name = 'HEADROOM'",
      "x_measured_constant_never_calibrated"),
-    ("an incumbent arm no viewing accepted",
-     "UPDATE lane SET decision_rule = 'incumbent' WHERE lane = 'm4-ipad-le1080p-sdr'; "
-     "INSERT INTO arm VALUES ('arm-i', 'b580-qsv-av1', 'incumbent', 'incumbent', NULL, '30'); "
-     "INSERT INTO arm_setting VALUES ('arm-i', 'qsv.preset', '4'), ('arm-i', 'qsv.b_strategy', '1')",
+    ("an incumbent arm no viewing accepted", "UPDATE arm SET accepted_by_viewing = NULL WHERE arm_id = 'arm-i'",
      "x_incumbent_arm_not_viewed"),
     ("an incumbent arm accepted by a viewing of a different configuration",
-     "UPDATE lane SET decision_rule = 'incumbent' WHERE lane = 'm4-ipad-le1080p-sdr'; "
-     "INSERT INTO arm VALUES ('arm-i', 'b580-qsv-av1', 'incumbent', 'incumbent', NULL, '30'); "
-     "INSERT INTO arm_setting VALUES ('arm-i', 'qsv.preset', '4'), ('arm-i', 'qsv.b_strategy', '1'); "
      "INSERT INTO viewing_verdict VALUES (2, 'acceptance', 'm4-ipad-le1080p-sdr', 'tng', 'g-a', NULL, 'iPad M4 13in', 'andy', 'acceptable', NULL, '2026-09-04'); "
      "UPDATE arm SET accepted_by_viewing = 2 WHERE arm_id = 'arm-i'",
      "incumbent_viewing_matches_arm"),
     ("an incumbent arm with no scored cell at its pinned anchor on a member",
-     "UPDATE lane SET decision_rule = 'incumbent' WHERE lane = 'm4-ipad-le1080p-sdr'; "
-     "INSERT INTO viewing_verdict VALUES (2, 'acceptance', 'm4-ipad-le1080p-sdr', 'tng', 'g-a', NULL, 'iPad M4 13in', 'andy', 'acceptable', NULL, '2026-09-04'); "
-     "INSERT INTO arm VALUES ('arm-i', 'b580-qsv-av1', 'incumbent', 'incumbent', 2, '30'); "
-     "INSERT INTO arm_setting VALUES ('arm-i', 'qsv.preset', '4'), ('arm-i', 'qsv.b_strategy', '0'); "
-     "DELETE FROM score WHERE cell_key = 'c-a30-parks'; UPDATE encode SET kept = 1 WHERE cell_key = 'c-a30-parks'",
+     "DELETE FROM score WHERE cell_key = 'c-i30-parks'; UPDATE encode SET kept = 1 WHERE cell_key = 'c-i30-parks'",
      "incumbent_arm_scored"),
     ("a target-bound lane whose targets name no viewing",
      "UPDATE lane SET decision_rule = 'target', score_target = 78.1 WHERE lane = 'm4-ipad-le1080p-sdr'",
@@ -711,6 +726,8 @@ MUTATIONS = [
      "x_shipping_arm_not_in_search"),
     ("a locate cell off the coarse ladder", "UPDATE cell_setting SET value = '25' WHERE cell_key = 'l-a24-tng' AND setting_id = 'qsv.q'",
      "x_locate_cell_off_the_coarse_ladder"),
+    ("a cell at an anchor past the encoder's range", "UPDATE cell_setting SET value = '55' WHERE cell_key = 'c-a50-tng' AND setting_id = 'qsv.q'",
+     "x_cell_anchor_outside_range"),
     ("a rung of the codec ladder the shipping arm never encoded",
      "UPDATE cell_setting SET value = '23' WHERE cell_key = 'c-a24-tng' AND setting_id = 'qsv.q'",
      "shipping_arm_ladder_complete"),
@@ -740,6 +757,9 @@ MUTATIONS = [
     ("a verdict with no encodes behind it", "DELETE FROM setting_verdict_cell WHERE verdict_id = 3",
      "x_verdict_without_cells"),
     ("an encode short of its cut's frames", "UPDATE encode SET frames = 1000 WHERE cell_key = 'c-a24-tng'",
+     "x_encode_short_of_frames"),
+    ("a screen encode short of its cut's frames -- the screen has no search to join through",
+     "UPDATE encode SET frames = 1000 WHERE cell_key = 's-p1'",
      "x_encode_short_of_frames"),
     ("a cell with no rate-control mode among its settings", "DELETE FROM cell_setting WHERE cell_key = 's-p1' AND setting_id = 'qsv.q'",
      "x_cell_without_a_rate_mode"),
@@ -772,7 +792,7 @@ DDL_REFUSALS = [
     ("a derived constant with no precision", "INSERT INTO constant VALUES ('X', 1.0, 'u', 'derived', '{}', NULL, NULL, NULL)"),
     ("a policy constant with no reason", "INSERT INTO constant VALUES ('Y', 0.5, 'u', 'policy', NULL, NULL, NULL, NULL)"),
     ("a policy constant with no value", "INSERT INTO constant VALUES ('Z', NULL, 'u', 'policy', NULL, NULL, 'because', NULL)"),
-    ("an incumbent arm with no pinned anchor", "INSERT INTO arm VALUES ('arm-i', 'b580-qsv-av1', 'incumbent', 'incumbent', NULL, NULL)"),
+    ("an incumbent arm with no pinned anchor", "INSERT INTO arm VALUES ('arm-j', 'b580-qsv-av1', 'incumbent-2', 'incumbent', NULL, NULL)"),
     ("a base arm with a pinned anchor", "UPDATE arm SET anchor_value = '30' WHERE arm_id = 'arm-a'"),
     ("a second ladder for a codec", "INSERT INTO ladder VALUES ('av1-b','av1')"),
     ("a target-bound lane with no target", "UPDATE lane SET decision_rule = 'target' WHERE lane = 'kids-ipad-standard-sdr'"),

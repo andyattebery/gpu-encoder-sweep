@@ -97,7 +97,7 @@ again.
 | **device** | address the card by **PCI slot**, never a render-node number |
 | **unit identity** | a distinct `encoder_unit` per card in a multi-card box, or the cell keys collide with the other card's |
 | **driver** | pinned and recorded on every row; **it is a FACTOR — part of the measurement key**, a column of `encoder_unit`. **A driver change is a new encoder unit, and the column starts again at Stage 1.** Probe the step before spending on it: one driver step moved bytes 14/14 and shifted the quality anchor, the next was inert |
-| **the same harness on the node** | the artifact a plan was built for is the artifact the agent reports; refuse a node already running one |
+| **the same harness on the node** | the artifact a plan was built for is the artifact the agent reports, and a plan is handed only to an agent reporting it; nothing is pushed |
 | **quiet box** | no other active run on the machine during a timing run |
 
 ### Write BOTH empty tables first
@@ -331,7 +331,7 @@ each candidate is a whole RD curve, which is why nothing enters without the scre
 `target` lane the acceptance viewings its targets come from; for an `incumbent` lane the acceptance
 viewing that found what ships today acceptable on the device.
 **Writes.** `search` (the class, the unit, the **anchor**, the **height**) · `arm` · `arm_setting`
-· `search_target`. FILES, authored — **the intent, which is why they are not rows.**
+· `search_target` · `search_coarse_rung`. FILES, authored — **the intent, which is why they are not rows.**
 **Decides.** The base arm (`arm.role = base`, exactly one), which is the shipping arm until a
 candidate beats it (`search.shipping_arm_id`); whether a search is earned, and which candidates
 (`role = candidate`); the targets (I1: never another card's range); the height (I2b: before anything
@@ -407,15 +407,16 @@ candidate that later wins gets the codec ladder too. **For an `incumbent` lane, 
 its pinned anchor on every member** — cells that already exist when the incumbent's settings are the
 base arm's and its anchor is a rung, one cell per member otherwise — so the bar Stage 10 reads was
 measured on this class and this unit. **Keeps the encode until it is scored.** The
-expected cell count is derived from the plan, never typed. The node's harness is proven the same
-harness by sha on both ends before launch.
+expected cell count is derived from the plan, never typed. The plan names the artifact it was
+built for, and only an agent reporting that artifact is handed it.
 
 **Reads.** `ladder_rung` for the base arm · `arm_ladder_rung` for the candidates · `arm_setting` · the
 incumbent arm's `anchor_value` · the reference cuts · `search`.
 **Writes.** `encode` (kept) · `cell_failure`. The plan — `run` (stage `encode`), `run_window`, `cell`,
 `cell_setting` — was rows before launch, so the expected count is `count(cell)`.
 **Decides.** Nothing. A plan derived from the search.
-**Refuses.** A busy node · a harness sha that differs · a cell on a window the run did not declare ·
+**Refuses.** An agent whose artifact is not the plan's · a cell at an anchor outside the encoder's
+range (UNREACHABLE, never a cell) · a cell on a window the run did not declare ·
 a run covering a window outside its class · a value outside the setting's enumeration · a cell
 whose identity settings match no arm · a rung of the codec ladder the shipping arm never encoded on
 some member, checked before Stage 10 reads it · an incumbent arm with no scored cell at its anchor on
@@ -461,7 +462,8 @@ does not say measure it last.
 `cell` (source cut), `cell_setting` — was rows before launch.
 **Decides.** Which arms to time, and N\*.
 **Refuses.** Averaging across decode paths · a delta smaller than the measured spread · a screen speed
-verdict as evidence · a timing run on the reference cut · reading a missing timing as "unchanged" —
+verdict as evidence · a timing run on the reference cut (the planner builds timing cells on the
+source cut only, so this is by construction) · reading a missing timing as "unchanged" —
 it is **UNMEASURED**.
 **Couples.** Forward: 9 (speed, within a decode path); 11 (`workers` = N\*, and the shipping preset);
 the regime statements, which are never carried across chains — the `av1_qsv` chain's encoder share
@@ -720,16 +722,17 @@ VMAF practice.*
 2. **FFVship**, two passes: `--source <ref> --encoded <enc> -m SSIMULACRA2 --json` and
    `-m Butteraugli`; threads at their default (raising `-t` slows it; the scores are bit-identical
    either way). FFVship writes per-frame values and no aggregate; **the pooling is ours**: `mean`,
-   `min`, `max`, `p5`, `p95`, where a percentile is **nearest rank, `ceil(p·n) − 1` into the ascending
-   list** — never floor, never `round(p·(n−1))`. The retired fork floored it and read one frame off
+   `min`, `max`, `p5` (and `p95`, computed and not stored), where a percentile is **nearest rank,
+   `ceil(p·n) − 1` into the ascending list** — never floor, never `round(p·(n−1))`. The retired fork floored it and read one frame off
    for every cell. Butteraugli is pooled per norm (qnorm, 3norm, infnorm); the campaign reads
    `infnorm max`.
 3. **libvmaf, one pass, four numbers:** input 0 is the DISTORTED encode, input 1 the REFERENCE —
    swapped they silently produce a wrong number. `libvmaf=feature=name=cambi|name=psnr|name=float_ssim:log_fmt=json:n_threads=<2 × cpu_count>`;
    with CUDA, both legs `format=yuv420p10le,hwupload_cuda` under `-init_hw_device cuda=cu
    -filter_hw_device cu` and the `libvmaf_cuda` filter — **10-bit in**, because an 8-bit conversion
-   moved CAMBI by 42%. Pooled `mean` of vmaf, cambi, psnr_y, float_ssim; harmonic means recorded where
-   present. The thread count is a speed lever measured bit-identical from 0 to 32.
+   moved CAMBI by 42%. Pooled `mean` of vmaf, cambi, psnr_y, float_ssim; libvmaf's harmonic means
+   are read and not stored — `score.statistic` holds `mean`, `p5`, `min` and `max`, nothing else.
+   The thread count is a speed lever measured bit-identical from 0 to 32.
 4. **Stored:** `ssimulacra2` mean · p5 · min; `butteraugli` max (infnorm); `vmaf`, `cambi`, `psnr_y`,
    `float_ssim` mean; each row with `height`, `recipe = S1` and `scorer_build` (FFVship version, ffmpeg
    build sha). **Deterministic:** FFVship is bit-deterministic on one GPU and libvmaf across thread
@@ -816,8 +819,8 @@ standard; which ends to sweep is judgement.*
 For a shipped row: the chain from `chain.vf_template`; then the settings — mode selectors first, the
 anchor next, the rest by `setting_id` — each as `setting.flag value`, booleans as `1` / `0`, a
 `computed` value with a comment naming its constant; the container, audio and subtitle policy from
-`lane`. A generated command is asserted by the scenario's `must_contain` / `must_not_contain`, which
-now test the generator. *Convention.*
+`lane`. A generated command is asserted by `must_contain` / `must_not_contain` lists that live with the
+renderer's tests, not in the store; they test the generator. *Convention.*
 
 ### P1 · The viewing
 
