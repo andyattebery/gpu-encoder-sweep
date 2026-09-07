@@ -92,7 +92,7 @@ again.
 | | requirement |
 |---|---|
 | **sample** | the class's reference set: a REFERENCE cut per window (lossless, **through the production chain**) and a SOURCE cut (`-c copy`) — Stage 0. **Quality cells encode from the reference cut, so they measure the ENCODER** — the scalers and tonemappers never run in the scored path — while throughput runs from the source cut. **Two pipelines, two inputs.** |
-| **chain** | the production filter graph per `(lane, host)`, **authored before the sample**: the reference cut is built through it, Stage 7 times it, and Stage 11 ships the same row |
+| **chain** | the production filter graph per `(lane, host, unit)`, **authored before the sample**: the reference cut is built through it, Stage 7 times it, and Stage 11 ships the same row |
 | **rig parity** | the measurement container is built from **production's image**, so the driver and the userspace are production's; refuse on drift. A separate rig image drifting to a different driver package invalidates the whole dataset |
 | **device** | address the card by **PCI slot**, never a render-node number |
 | **unit identity** | a distinct `encoder_unit` per card in a multi-card box, or the cell keys collide with the other card's |
@@ -167,7 +167,7 @@ flowchart TD
   S5 -->|encodes, kept| S6["6 · score"]
   S2 -->|the base arm EARLY at N*, and each candidate| S7["7 · time<br/>+ concurrency, split"]
   S2 -->|the incumbent arm at its pinned anchor, incumbent lanes| S5
-  CH["chain per lane x host, authored"] -->|the reference cut is built through it| S0
+  CH["chain per lane x host x unit, authored"] -->|the reference cut is built through it| S0
   CH -->|the production argv| S7
   S6 -.->|score, search only| S8["8 · rank · search only"]
   S7 -.->|timing, by decode path| S9["9 · categorise · search only"]
@@ -455,7 +455,7 @@ legs (split). ⚠⚠ **SPEED CAN BE THE DECISIVE CRITERION**: a preset step meas
 arms timed at Stage 2's time give that answer. I5 says speed is chosen after the iso-score point; it
 does not say measure it last.
 
-**Reads.** The source cuts · `chain(lane, host)` — the production argv, authored before the sample and the same row Stage 11 ships
+**Reads.** The source cuts · `chain(lane, host, unit)` — the production argv, authored before the sample and the same row Stage 11 ships
 · the arms to time: the base and the shipping arm at least · workers.
 **Writes.** `encode` (discarded) · `cell_failure` · `timing` (workers × repeat × leg, `decode_path`,
 `is_warmup`, the floor). The plan — `run` (stage `time`, `concurrency` or `split`), `run_window`,
@@ -615,7 +615,7 @@ the two places the process reads whole titles, both to produce a number and neve
 ### Stage 11 · Ship — one value per (lane, host, step)
 
 **Does.** Chooses the value per `(lane, host, step)` from Stage 10, the `workers` from Stage 7's N\*,
-and the production chain per `(lane, host)`; records **provenance** (`measured` · `derived` ·
+and the production chain per `(lane, host, unit)`; records **provenance** (`measured` · `derived` ·
 `no-content`), **who decided** (`measurement` · `policy`) and the reason; applies the constants Stage
 10b calibrated that admit the lane — `bitrate-target-encode`'s rate request is CEILING × HEADROOM and its bound is BOUND,
 and the row says so. ⚠ **A shipped anchor is a rung of its codec's ladder, and it was measured.** ⚠⚠ **Capability and

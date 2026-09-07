@@ -156,6 +156,11 @@ INSERT INTO encoder_unit VALUES
  ('nvidia-a4000-595-nvenc-hevc','nvidia','RTX A4000','595.71.05','nvenc','hevc'),
  ('nvidia-5060ti-595-nvenc-av1','nvidia','RTX 5060 Ti','595.71.05','nvenc','av1');
 
+INSERT INTO host_unit VALUES
+ ('media-01','intel-b580-ihd26.2.2-qsv-av1','/dev/dri/by-path/pci-0000:03:00.0-render'),
+ ('media-01','nvidia-a4000-595-nvenc-hevc','pci-0000:41:00.0'),
+ ('eta','nvidia-5060ti-595-nvenc-av1','pci-0000:01:00.0');
+
 INSERT INTO canonical_concept VALUES
  ('quality_anchor','a position on the codec ladder: -qp, -cq, -global_quality, -q:v'),
  ('rate_control_mode','constant-quantiser versus rate-targeted: -rc constqp, -rc_mode CQP, qsv -q:v'),
@@ -260,11 +265,12 @@ INSERT INTO window VALUES
  ('tng','tng',1400.0,60.0,'film grain','pinned','satavg+cuts v1',66.7,'1980s film scan, heavy grain'),
  ('tos','tos',777.0,60.0,'film grain','pinned','satavg+cuts v1',64.0,'the only non-h264 in the set; no VC-1 decoder on the B580');
 
+-- one chain per (lane, host, unit): the AV1 lane through the B580 on media-01 and the 5060 Ti on eta, the HEVC lanes through the A4000
 INSERT INTO chain VALUES
- ('m4-ipad-le1080p-sdr','media-01','null',NULL),
- ('m4-ipad-le1080p-sdr','eta','null',NULL),
- ('m4-ipad-gt1080p-sdr','media-01','null',NULL),
- ('kids-ipad-2d-animation-hdr','media-01','hwupload_cuda,tonemap_cuda=...,scale_cuda=...',NULL);
+ ('m4-ipad-le1080p-sdr','media-01','intel-b580-ihd26.2.2-qsv-av1','null',NULL),
+ ('m4-ipad-le1080p-sdr','eta','nvidia-5060ti-595-nvenc-av1','null',NULL),
+ ('m4-ipad-gt1080p-sdr','media-01','nvidia-a4000-595-nvenc-hevc','null',NULL),
+ ('kids-ipad-2d-animation-hdr','media-01','nvidia-a4000-595-nvenc-hevc','hwupload_cuda,tonemap_cuda=...,scale_cuda=...',NULL);
 
 INSERT INTO reference_set VALUES ('stage-1080p','1920x1080','p010le','media-01','8.1.2-Jellyfin 0b0ea2d','2026-08-25');
 
@@ -281,10 +287,10 @@ INSERT INTO content_class_stratum VALUES
  ('native-1080p-sdr','dark and noisy','character','dark and noisy',1,0.40),
  ('native-1080p-sdr','well-lit grain-free','character','well-lit grain-free',1,0.20);
 
-INSERT INTO cut (cut_id, reference_set_id, window_id, kind, chain_lane, chain_host, content_sha, bytes, frames, tags_pinned)
- SELECT window_id || '.ref', 'stage-1080p', window_id, 'reference', 'm4-ipad-le1080p-sdr', 'media-01', 'sha-' || window_id || '-ref', 2000000000, 1439, NULL FROM window;
-INSERT INTO cut (cut_id, reference_set_id, window_id, kind, chain_lane, chain_host, content_sha, bytes, frames, tags_pinned)
- SELECT window_id || '.src', 'stage-1080p', window_id, 'source', NULL, NULL, 'sha-' || window_id || '-src', 200000000, 1439, NULL FROM window;
+INSERT INTO cut (cut_id, reference_set_id, window_id, kind, chain_lane, chain_host, chain_unit, content_sha, bytes, frames, tags_pinned)
+ SELECT window_id || '.ref', 'stage-1080p', window_id, 'reference', 'm4-ipad-le1080p-sdr', 'media-01', 'intel-b580-ihd26.2.2-qsv-av1', 'sha-' || window_id || '-ref', 2000000000, 1439, NULL FROM window;
+INSERT INTO cut (cut_id, reference_set_id, window_id, kind, chain_lane, chain_host, chain_unit, content_sha, bytes, frames, tags_pinned)
+ SELECT window_id || '.src', 'stage-1080p', window_id, 'source', NULL, NULL, NULL, 'sha-' || window_id || '-src', 200000000, 1439, NULL FROM window;
 INSERT INTO cut_check SELECT cut_id, 'content', 'pass', NULL, '2026-08-26' FROM cut WHERE kind = 'reference';
 
 INSERT INTO search VALUES ('b580-qsv-av1','native-1080p-sdr','intel-b580-ihd26.2.2-qsv-av1','qsv.q',1548,'the first settings search; k = 3 factors, full factorial, preset swept',NULL);
@@ -434,10 +440,6 @@ INSERT INTO shipped_setting VALUES
  (5,'nvenc.preset','p2','identity',NULL),(5,'nvenc.tune','uhq','identity',NULL),(5,'nvenc.rc','constqp','identity',NULL),(5,'nvenc.qp','14','identity',NULL),
  (7,'nvenc.preset','p2','identity',NULL),(7,'nvenc.tune','uhq','identity',NULL),(7,'nvenc.rc','constqp','identity',NULL),(7,'nvenc.qp','14','identity',NULL),
  (9,'nvenc.preset','p2','identity',NULL),(9,'nvenc.tune','uhq','identity',NULL),(9,'nvenc.rc','vbr','identity',NULL),(9,'nvenc.b_v','17600000','computed','CEILING');
-INSERT INTO host_unit VALUES
- ('media-01','intel-b580-ihd26.2.2-qsv-av1','/dev/dri/by-path/pci-0000:03:00.0-render'),
- ('media-01','nvidia-a4000-595-nvenc-hevc','pci-0000:41:00.0'),
- ('eta','nvidia-5060ti-595-nvenc-av1','pci-0000:01:00.0');
 INSERT INTO routing_exclusion VALUES
  ('kids-ipad-standard-sdr','media-01','fixture: the kids lanes are not modelled here'),
  ('kids-ipad-standard-hdr','media-01','fixture: the kids lanes are not modelled here'),
@@ -695,14 +697,17 @@ MUTATIONS = [
     ("a setting value outside its enumeration", "UPDATE cell_setting SET value = '9' WHERE cell_key = 'c-a24-tng' AND setting_id = 'qsv.preset'",
      "x_setting_value_outside_enum"),
     ("a reference cut built with a chain the class does not serve",
-     "INSERT INTO chain VALUES ('kids-ipad-standard-sdr','media-01','scale_cuda=...',NULL); "
-     "UPDATE cut SET chain_lane = 'kids-ipad-standard-sdr' WHERE cut_id = 'tng.ref'",
+     "INSERT INTO chain VALUES ('kids-ipad-standard-sdr','media-01','nvidia-a4000-595-nvenc-hevc','scale_cuda=...',NULL); "
+     "UPDATE cut SET chain_lane = 'kids-ipad-standard-sdr', chain_unit = 'nvidia-a4000-595-nvenc-hevc' WHERE cut_id = 'tng.ref'",
      "x_cut_chain_not_a_served_lane"),
     ("a class member with no reference cut", "DELETE FROM cut_check WHERE cut_id = 'shield.ref'; DELETE FROM cut WHERE cut_id = 'shield.ref'",
      "x_member_without_reference_cut"),
     ("a class serving no lane", "DELETE FROM content_class_lane WHERE content_class_id = 'native-1080p-sdr'",
      "x_class_serves_no_lane"),
     ("a shipped encode with no chain on that host", "DELETE FROM chain WHERE lane = 'm4-ipad-gt1080p-sdr' AND host = 'media-01'",
+     "x_shipped_without_chain"),
+    ("a shipped encode whose chain is another unit's -- row 3 ships the A4000",
+     "UPDATE chain SET encoder_unit_id = 'intel-b580-ihd26.2.2-qsv-av1' WHERE lane = 'm4-ipad-gt1080p-sdr'",
      "x_shipped_without_chain"),
     ("a verdict under a base not measured to be honoured", "UPDATE setting_verdict SET verdict = 'INERT' WHERE setting_id = 'qsv.b_strategy'",
      "x_verdict_on_unmeasured_base"),
@@ -836,6 +841,8 @@ DDL_REFUSALS = [
     ("a run with no artifact",
      "INSERT INTO run (run_id, encoder_unit_id, host, node_label, stage, ffmpeg_build, ffmpeg_sha, harness_version, started_at) "
      "VALUES ('r', 'intel-b580-ihd26.2.2-qsv-av1', 'media-01', 'media-01-b580', 'probe', 'b', 's', 'g0', '2026-09-05')"),
+    ("a chain for a unit not on that host", "INSERT INTO chain VALUES ('m4-ipad-gt1080p-hdr','media-01','nvidia-5060ti-595-nvenc-av1','null',NULL)"),
+    ("a reference cut naming a chain without its unit", "UPDATE cut SET chain_unit = NULL WHERE cut_id = 'tng.ref'"),
     ("an event by nobody", "INSERT INTO run_event (run_id, at, state) VALUES ('b580-qsv-av1', '2026-09-03T03:00', 'running')"),
 ]
 

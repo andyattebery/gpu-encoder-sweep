@@ -196,12 +196,14 @@ CREATE TABLE ladder_rung (                                  -- a shipped quality
 -- @group reference
 -- @class FILE
 -- @writer authored
-CREATE TABLE chain (                                        -- the production filter graph per (lane, host): AUTHORED before the sample -- the reference cut is built through it; Stage 7 times it; Stage 11 ships the same row
-  lane        TEXT NOT NULL REFERENCES lane,
-  host        TEXT NOT NULL REFERENCES host,
-  vf_template TEXT NOT NULL,
-  notes_ref   TEXT,
-  PRIMARY KEY (lane, host)
+CREATE TABLE chain (                                        -- the production filter graph per (lane, host, unit): AUTHORED before the sample -- the reference cut is built through it; Stage 7 times it; Stage 11 ships the same row
+  lane            TEXT NOT NULL REFERENCES lane,
+  host            TEXT NOT NULL REFERENCES host,
+  encoder_unit_id TEXT NOT NULL REFERENCES encoder_unit,    -- the filter graph is per API: a box with two frontends has two chains for one lane
+  vf_template     TEXT NOT NULL,
+  notes_ref       TEXT,
+  PRIMARY KEY (lane, host, encoder_unit_id),
+  FOREIGN KEY (host, encoder_unit_id) REFERENCES host_unit (host, encoder_unit_id)   -- the unit is in that box
 ) STRICT;
 
 -- ============================================================================ SAMPLE
@@ -307,15 +309,17 @@ CREATE TABLE cut (                                          -- one window's file
   reference_set_id TEXT NOT NULL REFERENCES reference_set,
   window_id        TEXT NOT NULL REFERENCES window,
   kind             TEXT NOT NULL CHECK (kind IN ('reference','source')),
-  chain_lane       TEXT,                                    -- reference cuts: the lane whose chain built it
+  chain_lane       TEXT,                                    -- reference cuts: the chain that built it, by its three-part key
   chain_host       TEXT,
+  chain_unit       TEXT,
   content_sha      TEXT NOT NULL,                           -- of decoded FRAMES, never the container
   bytes            INTEGER NOT NULL,
   frames           INTEGER NOT NULL,
   tags_pinned      TEXT,
   UNIQUE (reference_set_id, window_id, kind),
-  FOREIGN KEY (chain_lane, chain_host) REFERENCES chain (lane, host),
-  CHECK ((kind = 'reference') = (chain_lane IS NOT NULL))
+  FOREIGN KEY (chain_lane, chain_host, chain_unit) REFERENCES chain (lane, host, encoder_unit_id),
+  CONSTRAINT cut_reference_names_chain CHECK ((kind = 'reference') = (chain_lane IS NOT NULL)   -- all three parts or none: SQLite skips a composite FK with a NULL in it
+    AND (chain_lane IS NULL) = (chain_host IS NULL) AND (chain_lane IS NULL) = (chain_unit IS NULL))
 ) STRICT;
 
 -- @group sample
@@ -819,12 +823,12 @@ CREATE VIEW x_class_serves_no_lane AS
   SELECT cc.content_class_id FROM content_class cc
    WHERE NOT EXISTS (SELECT 1 FROM content_class_lane cl WHERE cl.content_class_id = cc.content_class_id);
 
--- @check a shipped encode step on a host with no chain for that lane -- the build order could not emit a command
--- @fix author-chain for the lane on that host before ship; the build order emits its command from the chain
+-- @check a shipped encode step on a host with no chain for that lane and unit -- the build order could not emit a command
+-- @fix author-chain for the lane on that host and unit before ship; the build order emits its command from the chain
 CREATE VIEW x_shipped_without_chain AS
-  SELECT s.shipped_id, s.lane, s.host FROM shipped s
+  SELECT s.shipped_id, s.lane, s.host, s.encoder_unit_id FROM shipped s
    WHERE s.step IN ('quality-target-encode','bitrate-target-encode')
-     AND NOT EXISTS (SELECT 1 FROM chain c WHERE c.lane = s.lane AND c.host = s.host);
+     AND NOT EXISTS (SELECT 1 FROM chain c WHERE c.lane = s.lane AND c.host = s.host AND c.encoder_unit_id = s.encoder_unit_id);
 
 -- @check a screen verdict taken under a base the unit is not MEASURED to honour on that window
 -- @fix screen the base setting on that window first, to HONOURED; a verdict under an unhonoured base measures nothing

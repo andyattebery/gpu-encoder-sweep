@@ -49,7 +49,7 @@ schema's tables are named for them.** `SPEC.md` uses the same words.
 | **cap** | the device budget as a bitrate ceiling; a constant with a scope | headroom | `constant` CEILING |
 | **headroom** | the fraction of CEILING requested as the rate in `bitrate-target-encode` so a whole title lands under it; measured from the full-length encode; 0.98 ships and overshoots | the cap · the skip threshold | `constant` HEADROOM |
 | **skip threshold** | MARGIN: the saving the probe's encode must show over the source before encoding beats a remux; policy, bounded by the probe's precision | headroom | `constant` MARGIN |
-| **chain** | the production filter graph per `(lane, host)`, authored before the sample; the reference cut is built through it, Stage 7 times it, Stage 11 ships it | the reference set | `chain` |
+| **chain** | the production filter graph per `(lane, host, unit)`, authored before the sample; the reference cut is built through it, Stage 7 times it, Stage 11 ships it | the reference set | `chain` |
 | **target** | an absolute score a `target` lane must hit, from an acceptance viewing | the incumbent's score · the cap | `search_target` |
 | **panel height** | the device's 16:9 height, both dimensions forced even, where every score is read: 1250 kids, 1548 M4 (recipe G1) | the encode height | `lane.score_height` |
 | **recipe** | a named, versioned procedure a row depends on — S1 scoring, K1 the key, W1 selection, T1 timing …; a changed recipe is a new name and a re-run | a build | `score.recipe`, `SPEC.md` |
@@ -232,7 +232,8 @@ content into the class, not to relabel the lane** — and until that happens the
     reference_set          reference_set_id · geometry · pix_fmt · built_on · built_with
                            · built_at                                                              ROW (materialise)
     cut                    cut_id · reference_set_id · window_id · kind ∈ {reference, source}
-                           · chain_lane · chain_host · content_sha · bytes · frames · tags_pinned  ROW (materialise)
+                           · chain_lane · chain_host · chain_unit · content_sha · bytes · frames
+                           · tags_pinned                                                           ROW (materialise)
     cut_check              cut_id · check_name · result ∈ {pass, fail, classified} · reason
                            · checked_at                                                            ROW (verify)
 <!-- END GENERATED: sample:b -->
@@ -240,8 +241,8 @@ content into the class, not to relabel the lane** — and until that happens the
 - **The reference is the chain minus the encoder** — decoded, scaled, tonemapped, stored lossless —
   where the chain is the one the title's lane would apply: an HDR title through the tonemap, an SDR
   title without it, a passthrough lane decode alone. **A class can hold both, because the encoder
-  sees the same kind of pixels either way, and measuring any content is the point.** `cut.chain_lane`
-  and `chain_host` name the chain that built it, authored before the sample. **The reference is both
+  sees the same kind of pixels either way, and measuring any content is the point.** `cut.chain_lane`,
+  `chain_host` and `chain_unit` name the chain that built it, authored before the sample. **The reference is both
   the encode source and the score reference, so a quality cell measures the ENCODER**; the chain
   never runs in the scored path.
 - **The source cut is the window `-c copy`** — the file the flow itself would read. Throughput
@@ -389,7 +390,7 @@ No writer derives its header from the first row it happens to have.
     constant_scope         name · lane                                                             FILE
     ladder                 ladder_id · codec ∈ {hevc, av1}                                         FILE
     ladder_rung            ladder_id · rung                                                        FILE
-    chain                  lane · host · vf_template · notes_ref                                   FILE
+    chain                  lane · host · encoder_unit_id · vf_template · notes_ref                 FILE
 <!-- END GENERATED: schema:reference -->
 
 ⚠⚠ **`encoder_unit` IS A TABLE, SO THE MEASUREMENT KEY IS A FOREIGN KEY RATHER THAN A CONVENTION.**
@@ -513,7 +514,8 @@ flag, and `cell_setting` is what it became.
     content_class_stratum  content_class_id · stratum · kind ∈ {inventory, quantile, character}
                            · definition · min_windows · share_estimate                             FILE
     cut                    cut_id · reference_set_id · window_id · kind ∈ {reference, source}
-                           · chain_lane · chain_host · content_sha · bytes · frames · tags_pinned  ROW (materialise)
+                           · chain_lane · chain_host · chain_unit · content_sha · bytes · frames
+                           · tags_pinned                                                           ROW (materialise)
     cut_check              cut_id · check_name · result ∈ {pass, fail, classified} · reason
                            · checked_at                                                            ROW (verify)
 <!-- END GENERATED: schema:sample -->
@@ -641,6 +643,8 @@ erDiagram
     lane ||--o{ constant_scope : "lane"
     constant ||--o{ constant_scope : "name"
     ladder ||--o{ ladder_rung : "ladder_id"
+    host_unit ||--o{ chain : "host,encoder_unit_id"
+    encoder_unit ||--o{ chain : "encoder_unit_id"
     host ||--o{ chain : "host"
     lane ||--o{ chain : "lane"
     host {
@@ -747,6 +751,7 @@ erDiagram
     chain {
         TEXT lane PK, FK
         TEXT host PK, FK
+        TEXT encoder_unit_id PK, FK
         TEXT vf_template
         TEXT notes_ref
     }
@@ -764,7 +769,7 @@ erDiagram
     window ||--o{ content_class_member : "window_id"
     content_class ||--o{ content_class_member : "content_class_id"
     content_class ||--o{ content_class_stratum : "content_class_id"
-    chain ||--o{ cut : "chain_lane,chain_host"
+    chain ||--o{ cut : "chain_lane,chain_host,chain_unit"
     window ||--o{ cut : "window_id"
     reference_set ||--o{ cut : "reference_set_id"
     cut ||--o{ cut_check : "cut_id"
@@ -835,6 +840,7 @@ erDiagram
         TEXT kind "reference | source"
         TEXT chain_lane FK
         TEXT chain_host FK
+        TEXT chain_unit FK
         TEXT content_sha
         INTEGER bytes
         INTEGER frames
@@ -1115,6 +1121,8 @@ Every foreign key, child to parent:
     constant_scope.lane -> lane.lane
     constant_scope.name -> constant.name
     ladder_rung.ladder_id -> ladder.ladder_id
+    chain.host,encoder_unit_id -> host_unit.host,encoder_unit_id
+    chain.encoder_unit_id -> encoder_unit.encoder_unit_id
     chain.host -> host.host
     chain.lane -> lane.lane
     window.title_id -> title.title_id
@@ -1125,7 +1133,7 @@ Every foreign key, child to parent:
     content_class_member.window_id -> window.window_id
     content_class_member.content_class_id -> content_class.content_class_id
     content_class_stratum.content_class_id -> content_class.content_class_id
-    cut.chain_lane,chain_host -> chain.lane,host
+    cut.chain_lane,chain_host,chain_unit -> chain.lane,host,encoder_unit_id
     cut.window_id -> window.window_id
     cut.reference_set_id -> reference_set.reference_set_id
     cut_check.cut_id -> cut.cut_id
@@ -1448,7 +1456,7 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 | `x_cut_chain_not_a_served_lane` | a reference cut built with the chain of a lane its class does not serve | materialise the cut with the chain of a lane the class serves, or define-class with the chain's lane |
 | `x_member_without_reference_cut` | a class member with no reference cut in the class's reference set | materialise the class's reference set over every member before define-class names them |
 | `x_class_serves_no_lane` | a class that serves no lane | define-class with at least one lane; a class exists to give a lane its evidence |
-| `x_shipped_without_chain` | a shipped encode step on a host with no chain for that lane -- the build order could not emit a command | author-chain for the lane on that host before ship; the build order emits its command from the chain |
+| `x_shipped_without_chain` | a shipped encode step on a host with no chain for that lane and unit -- the build order could not emit a command | author-chain for the lane on that host and unit before ship; the build order emits its command from the chain |
 | `x_verdict_on_unmeasured_base` | a screen verdict taken under a base the unit is not MEASURED to honour on that window | screen the base setting on that window first, to HONOURED; a verdict under an unhonoured base measures nothing |
 | `x_arm_setting_not_honoured` | an arm using a setting the unit is not MEASURED to honour on any member of the class | screen the setting on a member of the class to HONOURED before author-search puts it in an arm |
 | `x_ladder_from_a_non_locate_run` | a derived ladder whose run is not a LOCATE run of the same search | derive-ladders from the search's own locate run; a ladder derived from any other run is discarded |
