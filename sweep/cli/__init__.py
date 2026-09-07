@@ -15,7 +15,7 @@ from collections import OrderedDict, namedtuple
 
 import httpx
 
-Verb = namedtuple("Verb", "method path flags")   # flags: ((field, parser), ...) in the body's field order
+Verb = namedtuple("Verb", "method path flags local", defaults=((),))   # flags: the body's fields in order; local: the CLI's own options
 
 
 def boolean(text):
@@ -84,6 +84,7 @@ VERBS = OrderedDict([
     ("exclude-route", verb("/decision/exclude-route", "lane", "host", "reason")),
     ("status", get("/runs/status")),
     ("check", get("/analysis/check")),
+    ("export", Verb("GET", "/record/export", (), (("into", "write the record's files under this directory, removing what an earlier export wrote"),))),
 ])
 
 
@@ -94,6 +95,8 @@ def build_parser():
     sub = ap.add_subparsers(dest="verb", required=True, metavar="verb")
     for name, v in VERBS.items():
         p = sub.add_parser(name, help=v.path)
+        for name_, help_ in v.local:
+            p.add_argument("--" + name_, dest=name_, metavar="DIR", help=help_)
         if v.method == "POST":
             p.add_argument("--from", dest="from_file", metavar="FILE", help="the body as JSON; flags override it")
             for field, parse in v.flags:
@@ -123,5 +126,10 @@ def main(argv=None, transport=None):
     except httpx.TransportError as e:
         print(f"sweep: the hub at {args.hub} is unreachable: {e}", file=sys.stderr)
         return 2
+    if args.verb == "export" and r.status_code == 200 and getattr(args, "into", None):
+        from sweep.hub.export import write
+        written = write(r.json()["files"], args.into)
+        print(f"{len(written)} files under {args.into}")
+        return 0
     print(r.text)
     return 1 if r.text.startswith("REFUSING") or r.status_code >= 400 else 0

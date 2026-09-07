@@ -214,7 +214,8 @@ arrays uploaded separately and kept by the hub beside the store, outside the exp
   `butteraugli` max, `vmaf`/`cambi`/`psnr_y`/`float_ssim` mean, `recipe`, `scorer_build`, under the
   score run), `step_trace`, `timing`; derived tables (`setting_verdict`, `arm_ladder_rung`, `constant_value`) are
   written by the hub's own verbs.
-- **The export** (the campaign repo's `record/`): `authored/<table>.json`, `runs/<id>/plan.json`,
+- **The export** (the campaign repo's `record/`): `authored/<table>.json`, `sample/<table>.json` (the
+  sample's ROW tables: title, reference set, cut, cut check), `runs/<id>/plan.json`,
   `runs/<id>/events.jsonl`, `runs/<id>/records/*.json`, `constants.json`, `openapi.json` —
   deterministic ordering, so a re-export of unchanged state is an empty diff.
 
