@@ -151,7 +151,7 @@
      "today": ["SPEC.md Stage 1, test 3", "tasks/b580-lane.md 2026-09-01 09:41"],
      "test": "The monotonicity check refuses a step size larger than 1 and a window that is not the binding one.",
      "disposition": "process",
-     "how": "Stage 1's third admissibility test; the store holds the verdict, not the sweep"},
+     "how": "Stage 1's third admissibility test; the store holds the verdict as an `admissibility_verdict` row with the sweep's cells behind it (`x_admissibility_without_cells`), and a search on an anchor with no ADMISSIBLE `monotone` verdict is refused (`x_search_mode_not_admissible`); the step size and the window are the process's"},
 
     {"id": "adm-quality-range-is-an-encoder-limit",
      "invariant": "A target outside the encoder's quality range is UNREACHABLE -- an admissibility property, not a missing measurement.",

@@ -263,7 +263,9 @@ measurement before it.
 
 **Does.** Two things, both on real content of the class, and both before any search exists.
 
-**(a) The admissibility tests**, each a refusal recorded with the base it was taken under:
+**(a) The admissibility tests**, each a refusal recorded with the base it was taken under — tests 1, 3 and 6
+are `admissibility_verdict` rows (`opens`, `monotone`, `obeys_rate`) carrying the cells behind them, and a
+search's anchor needs `opens` and `monotone` ADMISSIBLE before it is authored (`x_search_mode_not_admissible`):
 1. **Does the encoder open in the mode this lane ships?** Verbatim stderr, not rc. An encoder that cannot open in a mode fails
    every cell that uses it — hundreds at a time in a locate pass.
 2. **Which rate-control mode is actually selected?** On QSV it is **implicit** — `-q:v` → CQP,

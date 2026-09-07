@@ -418,6 +418,15 @@ INSERT INTO cell_setting VALUES ('s-p1','qsv.preset','1','identity'),('s-p4','qs
 INSERT INTO encode VALUES ('s-p1',63000000,8400.0,1439,60.0,'hardware',0),('s-p4',60000000,8000.0,1439,60.0,'hardware',0);
 INSERT INTO setting_verdict VALUES (3,'intel-b580-ihd26.2.2-qsv-av1','qsv.preset','tng','HONOURED',5.01,NULL,NULL,2.77,NULL);
 INSERT INTO setting_verdict_cell VALUES (1,'s-bs0'),(1,'s-bs1'),(2,'s-ab1'),(2,'s-bs1'),(3,'s-p1'),(3,'s-p4');
+-- the admissibility tests on the anchor, Stage 1(a): the mode OPENS (a cell that encoded in it), and it is MONOTONE across the
+-- screen's q sweep on the binding window (three points here; the real sweep is step 1 with repeats)
+INSERT INTO cell VALUES ('s-q24','b580-qsv-av1-screen','tng','reference'),('s-q36','b580-qsv-av1-screen','tng','reference');
+INSERT INTO cell_setting VALUES ('s-q24','qsv.q','24','identity'),('s-q36','qsv.q','36','identity');
+INSERT INTO encode VALUES ('s-q24',66000000,8800.0,1439,60.0,'hardware',0),('s-q36',54000000,7200.0,1439,60.0,'hardware',0);
+INSERT INTO admissibility_verdict VALUES
+ (1,'intel-b580-ihd26.2.2-qsv-av1','qsv.q','opens','tng',NULL,NULL,'ADMISSIBLE',NULL),
+ (2,'intel-b580-ihd26.2.2-qsv-av1','qsv.q','monotone','tng',NULL,NULL,'ADMISSIBLE',NULL);
+INSERT INTO admissibility_verdict_cell VALUES (1,'s-p4'),(2,'s-q24'),(2,'s-p4'),(2,'s-q36');
 
 -- the viewing: two encodes KEPT for a person to view, and the verdict
 INSERT INTO cell VALUES ('g-a','b580-viewing','tng','reference'),('g-b','b580-viewing','tng','reference'),('g-i','b580-viewing','tng','reference');
@@ -811,6 +820,14 @@ MUTATIONS = [
      "x_search_mixed_scorers_without_equivalence"),
     ("a run whose unit is not in its host", "UPDATE run SET host = 'eta' WHERE run_id = 'b580-qsv-av1-screen'",
      "x_run_unit_not_on_host"),
+    ("a search whose anchor was never tested to open",
+     "DELETE FROM admissibility_verdict_cell WHERE admissibility_id = 1; DELETE FROM admissibility_verdict WHERE admissibility_id = 1",
+     "x_search_mode_not_admissible"),
+    ("a search whose anchor reversed on the binding window",
+     "UPDATE admissibility_verdict SET verdict = 'INADMISSIBLE', reason = 'bytes rose from q 30 to q 31 on tng' WHERE admissibility_id = 2",
+     "x_search_mode_not_admissible"),
+    ("an admissibility verdict with no encodes behind it", "DELETE FROM admissibility_verdict_cell WHERE admissibility_id = 2",
+     "x_admissibility_without_cells"),
     ("a verdict with no encodes behind it", "DELETE FROM setting_verdict_cell WHERE verdict_id = 3",
      "x_verdict_without_cells"),
     ("an encode short of its cut's frames", "UPDATE encode SET frames = 1000 WHERE cell_key = 'c-a24-tng'",
@@ -882,6 +899,7 @@ DDL_REFUSALS = [
     ("an encode run with a parent", "UPDATE run SET parent_run_id = 'b580-qsv-av1-locate' WHERE run_id = 'b580-qsv-av1'"),
     ("a scorer with an unknown backend", "INSERT INTO scorer VALUES ('eta-wsl', '[]', '[]', 'vmaf', 0, '/c')"),
     ("an equivalence whose exactness is not a bool", "INSERT INTO scorer_equivalence VALUES ('b580-qsv-av1-score', 'b580-qsv-av1-score', 'vmaf', 'mean', 1, 0.0, 2)"),
+    ("an INADMISSIBLE verdict with no reason", "INSERT INTO admissibility_verdict VALUES (3, 'intel-b580-ihd26.2.2-qsv-av1', 'qsv.q', 'obeys_rate', 'tng', NULL, NULL, 'INADMISSIBLE', NULL)"),
     ("an event by nobody", "INSERT INTO run_event (run_id, at, state) VALUES ('b580-qsv-av1', '2026-09-03T03:00', 'running')"),
 ]
 

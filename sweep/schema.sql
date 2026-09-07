@@ -530,6 +530,31 @@ CREATE TABLE setting_verdict_cell (                         -- the encodes a ver
   PRIMARY KEY (verdict_id, cell_key)
 ) STRICT;
 
+-- @group measurement
+-- @class ROW
+-- @writer screen
+CREATE TABLE admissibility_verdict (                        -- Stage 1(a): a refusal recorded with the base it was taken under; a search's anchor must open and be monotone first
+  admissibility_id INTEGER PRIMARY KEY,
+  encoder_unit_id  TEXT NOT NULL REFERENCES encoder_unit,
+  setting_id       TEXT NOT NULL REFERENCES setting,        -- the anchor or mode selector the test was taken on
+  test             TEXT NOT NULL CHECK (test IN ('opens','monotone','obeys_rate')),
+  window_id        TEXT NOT NULL REFERENCES window,         -- monotone: the BINDING window
+  base_setting_id  TEXT REFERENCES setting,                 -- the base it was taken under
+  base_value       TEXT,
+  verdict          TEXT NOT NULL CHECK (verdict IN ('ADMISSIBLE','INADMISSIBLE')),
+  reason           TEXT,                                    -- INADMISSIBLE needs one: the stderr, the reversal
+  UNIQUE (encoder_unit_id, setting_id, test, window_id, base_setting_id, base_value),
+  CONSTRAINT admissibility_inadmissible_has_reason CHECK (verdict <> 'INADMISSIBLE' OR reason IS NOT NULL)
+) STRICT;
+
+-- @group measurement
+-- @class ROW
+-- @writer screen
+CREATE TABLE admissibility_verdict_cell (                   -- the encodes a verdict summarises: the sweep and its repeats
+  admissibility_id INTEGER NOT NULL REFERENCES admissibility_verdict,
+  cell_key         TEXT NOT NULL REFERENCES cell,
+  PRIMARY KEY (admissibility_id, cell_key)
+) STRICT;
 
 -- @group measurement
 -- @class FILE
@@ -1054,6 +1079,21 @@ CREATE VIEW x_run_unit_not_on_host AS
   SELECT r.run_id, r.host, r.encoder_unit_id FROM run r
    WHERE r.encoder_unit_id IS NOT NULL AND r.stage <> 'score'
      AND NOT EXISTS (SELECT 1 FROM host_unit hu WHERE hu.host = r.host AND hu.encoder_unit_id = r.encoder_unit_id);
+
+-- @check a search whose anchor has no ADMISSIBLE opens and monotone verdict on its unit -- a mode that cannot open or invert is not searched
+-- @fix run the screen's admissibility tests on the anchor first: opens, and monotone at step 1 on the binding window; author-search once both are ADMISSIBLE
+CREATE VIEW x_search_mode_not_admissible AS
+  SELECT s.search_id, s.anchor_setting_id, t.test
+    FROM search s, (SELECT 'opens' AS test UNION SELECT 'monotone') t
+   WHERE NOT EXISTS (SELECT 1 FROM admissibility_verdict a
+                      WHERE a.encoder_unit_id = s.encoder_unit_id AND a.setting_id = s.anchor_setting_id
+                        AND a.test = t.test AND a.verdict = 'ADMISSIBLE');
+
+-- @check an admissibility verdict with no encodes behind it -- a test that did not run is not evidence
+-- @fix the screen posts a verdict with the cells it summarises; re-run the test
+CREATE VIEW x_admissibility_without_cells AS
+  SELECT a.admissibility_id, a.test FROM admissibility_verdict a
+   WHERE NOT EXISTS (SELECT 1 FROM admissibility_verdict_cell c WHERE c.admissibility_id = a.admissibility_id);
 
 -- @check a screen verdict with no encodes behind it -- a probe that did not run is not evidence
 -- @fix the screen posts a verdict with the cells it summarises; re-run the probe

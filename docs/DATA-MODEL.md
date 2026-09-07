@@ -56,7 +56,7 @@ schema's tables are named for them.** `SPEC.md` uses the same words.
 | **stage** | one of the process's Stages 0–11 and 10b; `run.stage` names the ones a node executes, and the diagnostics beside the column | a Phase of the plan · a directory · a scoring step | `run.stage` |
 | **phase** | one of the rewrite plan's Phases 0–5 | a process stage | the plan |
 | **scoring step** | one leg of Stage 6: rescale, ssimu2, butteraugli, libvmaf | a process stage | `step_trace.scoring_step` |
-| **admissibility test** | Stage 1's refusals: opens · which mode · monotone · decodes · range · obeys a rate | a check · the viewing | Stage 1 |
+| **admissibility test** | Stage 1's refusals: opens · which mode · monotone · decodes · range · obeys a rate; `opens`, `monotone` and `obeys_rate` are rows with the cells behind them, and a search's anchor needs the first two ADMISSIBLE | a check · the viewing | `admissibility_verdict` |
 | **screen** | Stage 1's per-setting, per-window verdict: honoured, inert, rejected… | the search | `setting_verdict` |
 | **the viewing** | a person's verdict on the device: a **pair** (a against b) or an **acceptance** (for a lane's use); Stage 2's required input | a gate · a check · a test | `viewing_verdict` |
 | **check** | an `x_*` view that must return zero rows | a test · a refusal in code | `schema.sql` |
@@ -562,6 +562,10 @@ flag, and `cell_setting` is what it became.
                            · magnitude_pct · base_setting_id · base_value · noise_floor_pct
                            · reason                                                                ROW (screen)
     setting_verdict_cell   verdict_id · cell_key                                                   ROW (screen)
+    admissibility_verdict  admissibility_id · encoder_unit_id · setting_id
+                           · test ∈ {opens, monotone, obeys_rate} · window_id · base_setting_id
+                           · base_value · verdict ∈ {ADMISSIBLE, INADMISSIBLE} · reason            ROW (screen)
+    admissibility_verdict_celladmissibility_id · cell_key                                          ROW (screen)
     search                 search_id · content_class_id · encoder_unit_id · anchor_setting_id
                            · score_height · notes · shipping_arm_id                                FILE
     arm                    arm_id · search_id · name · role ∈ {base, candidate, incumbent}
@@ -901,6 +905,12 @@ erDiagram
     encoder_unit ||--o{ setting_verdict : "encoder_unit_id"
     cell ||--o{ setting_verdict_cell : "cell_key"
     setting_verdict ||--o{ setting_verdict_cell : "verdict_id"
+    setting ||--o{ admissibility_verdict : "base_setting_id"
+    window ||--o{ admissibility_verdict : "window_id"
+    setting ||--o{ admissibility_verdict : "setting_id"
+    encoder_unit ||--o{ admissibility_verdict : "encoder_unit_id"
+    cell ||--o{ admissibility_verdict_cell : "cell_key"
+    admissibility_verdict ||--o{ admissibility_verdict_cell : "admissibility_id"
     arm ||--o{ search : "shipping_arm_id"
     setting ||--o{ search : "anchor_setting_id"
     encoder_unit ||--o{ search : "encoder_unit_id"
@@ -1031,6 +1041,21 @@ erDiagram
     }
     setting_verdict_cell {
         INTEGER verdict_id PK, FK
+        TEXT cell_key PK, FK
+    }
+    admissibility_verdict {
+        INTEGER admissibility_id PK
+        TEXT encoder_unit_id FK
+        TEXT setting_id FK
+        TEXT test "opens | monotone | obeys_rate"
+        TEXT window_id FK
+        TEXT base_setting_id FK
+        TEXT base_value
+        TEXT verdict "ADMISSIBLE | INADMISSIBLE"
+        TEXT reason
+    }
+    admissibility_verdict_cell {
+        INTEGER admissibility_id PK, FK
         TEXT cell_key PK, FK
     }
     search {
@@ -1197,6 +1222,12 @@ Every foreign key, child to parent:
     setting_verdict.encoder_unit_id -> encoder_unit.encoder_unit_id
     setting_verdict_cell.cell_key -> cell.cell_key
     setting_verdict_cell.verdict_id -> setting_verdict.verdict_id
+    admissibility_verdict.base_setting_id -> setting.setting_id
+    admissibility_verdict.window_id -> window.window_id
+    admissibility_verdict.setting_id -> setting.setting_id
+    admissibility_verdict.encoder_unit_id -> encoder_unit.encoder_unit_id
+    admissibility_verdict_cell.cell_key -> cell.cell_key
+    admissibility_verdict_cell.admissibility_id -> admissibility_verdict.admissibility_id
     search.shipping_arm_id -> arm.arm_id
     search.anchor_setting_id -> setting.setting_id
     search.encoder_unit_id -> encoder_unit.encoder_unit_id
@@ -1319,7 +1350,7 @@ each change of grain is exactly where an aggregation bug enters.
 | stage | one row is | reads | WRITES |
 |---|---|---|---|
 | **sample** — frame · select · pin · materialise · verify | a cut | `title`, `lane`, `chain` | `reference_set`, `cut`, `cut_check` — the frame, `window` and `content_class` are FILES |
-| **screen** | `(encoder_unit, setting, window)` | `setting`, `setting_scope`, `cut` (reference) | **`setting_verdict`** per window |
+| **screen** | `(encoder_unit, setting, window)` | `setting`, `setting_scope`, `cut` (reference) | **`setting_verdict`** per window; **`admissibility_verdict`** for the anchor's mode, each with its cells |
 | **candidates** | the base arm, and a candidate when the screen earned it | `v_setting_unit_reading`, `setting.subsystem`, `lane`, the viewing | **`search`, `arm`, `arm_setting`, `search_target`** — FILES, the intent |
 | **locate** | `(arm, coarse rung, window)` | `content_class`, `setting`, `cut` (reference) | `encode`, `cell_failure` — the plan (`run`, `run_window`, `cell`, `cell_setting`) was rows at launch |
 | **derive ladders** | `(arm, window)` | locate `encode`, `cell_setting`, `search_target`, `ladder_rung` | **`arm_ladder_rung`** — carrying the locate run, never the spec |
@@ -1365,7 +1396,8 @@ outside the ladder is `UNREACHABLE`, not a number.
     orchestrate   ->  run · run_event · run_window · cell · cell_setting
     encode core   ->  encode · cell_failure
     derive ladders ->  arm_ladder_rung
-    screen        ->  setting_verdict · setting_verdict_cell
+    screen        ->  setting_verdict · setting_verdict_cell · admissibility_verdict
+                      · admissibility_verdict_cell
     score         ->  score · step_trace
     time          ->  timing
     equivalence   ->  scorer_equivalence
@@ -1520,6 +1552,8 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 | `x_score_run_host_without_scorer` | a score run on a host with no scorer row -- the plan could not say what to score with | add-scorer for the host, or score on a host that has one |
 | `x_search_mixed_scorers_without_equivalence` | a search scored on two hosts with no equivalence between them marked exact for ssimulacra2 and butteraugli -- two scorers are one instrument only once measured so | score the search on one scorer, or run equivalence between the two and split it only when exact |
 | `x_run_unit_not_on_host` | a run whose unit is not in the host it ran on -- a score run is exempt: its unit is its parent's, and its host holds the scorer | plan the run on a host that has the unit (add-unit puts a unit on a host) |
+| `x_search_mode_not_admissible` | a search whose anchor has no ADMISSIBLE opens and monotone verdict on its unit -- a mode that cannot open or invert is not searched | run the screen's admissibility tests on the anchor first: opens, and monotone at step 1 on the binding window; author-search once both are ADMISSIBLE |
+| `x_admissibility_without_cells` | an admissibility verdict with no encodes behind it -- a test that did not run is not evidence | the screen posts a verdict with the cells it summarises; re-run the test |
 | `x_verdict_without_cells` | a screen verdict with no encodes behind it -- a probe that did not run is not evidence | the screen posts a verdict with the cells it summarises; re-run the probe |
 | `x_encode_short_of_frames` | an encode with fewer frames than its cut -- a leg is verified by FRAME COUNT, never exit status | the encode did not run to the end; read its stderr, fix the cause and re-encode the cell |
 | `x_cell_without_a_rate_mode` | a cell whose identity settings carry no rate-control mode -- the mode is derived from what is set, never read off argv | plan the cell with its rate-control setting among the identity settings; a mode read off argv is not a setting |
