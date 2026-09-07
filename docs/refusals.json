@@ -53,7 +53,7 @@
      "today": ["sweep.py:2239", "sweep.py:5349"],
      "test": "Changing the metric backend changes the cell key.",
      "disposition": "by_construction",
-     "how": "`run.scorer_build` and `metric_backend` are inputs to the cell key"},
+     "how": "`scorer.metric_backend` is part of the build strings `add-scorer` takes from the agent's `identify`, and `score`'s primary key carries `scorer_build`; K1 deliberately excludes it, so a re-score under another scorer is a new row, not a collision"},
 
     {"id": "id-scoping-reaches-every-builder",
      "invariant": "Host/backend scoping must reach EVERY command builder, and the set is discovered by introspection, not listed by hand.",

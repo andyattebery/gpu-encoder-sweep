@@ -1,6 +1,6 @@
 # The data model — the store is primary, the docs are renderings
 
-**Phase 3 of `plans/greenfield-harness-rewrite.md`.**
+**The model. `SPEC.md` is the process it serves; `ARCHITECTURE.md` is what runs it.**
 
 ⚠⚠ **THE CHANGE OF POSITION THAT SHAPES THIS DOCUMENT.** `TDARR-TRANSCODE-PLAN.md` is today
 **hand-derived from a table buried in a 4,640-line RESULTS**, and then `doc_check` verifies after the
@@ -78,7 +78,7 @@ schema's tables are named for them.** `SPEC.md` uses the same words.
 | **run state** | one stored column, planned · launched · running · complete · failed · abandoned, with `run_event` as its log; a cell's state is derived from its rows | a log file | `run.state`, `run_event`, `v_cell_state` |
 | **the plan** | a run's cells and their settings, written before launch; `count(cell)` is the expected count | a typed count | `cell`, `cell_setting` |
 | **orchestrate** | the harness's launch, wait and fetch primitive; the one writer of `run`, `run_window`, `run_event`, `cell`, `cell_setting` | a stage | the writers list |
-| **verb** | the one entry for an operator input: it validates and writes a FILE table; no file is edited by hand | a script | Phase 4 |
+| **verb** | the one entry for an operator input: an endpoint that validates and writes a FILE table in a checked transaction; no file is edited by hand | a script | `ARCHITECTURE.md` |
 | **disposition** | what the new harness does about a refusal: by construction · a check · a process rule · judgement | | `refusals.json` |
 
 **Retired words, and what replaced them:** *gate* → the viewing, an admissibility test, or
@@ -453,17 +453,19 @@ one window is the binding one, are JUDGEMENT.
 **One queryable store. Two kinds of table in it: what was MEASURED, and what was DECIDED.** A
 question is a query; a document section is a query plus a template.
 
-### Format: SQLite as the store, CSV as the export
+### Format: SQLite is the record, the export is the text
 
-- **SQLite** — one file, no server, in the standard library, and it answers ad-hoc questions without
-  bespoke code. That is the property being bought: *"easy to answer other questions"* means someone
-  can ask one that nobody anticipated, without writing a reader.
-- **CSV export beside it**, one file per table, regenerated from the store — so the data stays
-  git-diffable and reviewable, which the current CSVs are and a binary is not.
-- ⚠ **The store is the source of truth; the CSVs are a rendering.** The reverse is what produced six
-  headers from one producer.
-- ⚠ **The store is rebuildable from the ledger.** It is a cache with a schema, not an original —
-  otherwise a schema change becomes a migration under a running campaign.
+- **SQLite inside the hub** — one file, no server, in the standard library, and it answers ad-hoc
+  questions without bespoke code. That is the property being bought: *"easy to answer other
+  questions"* means someone can ask one that nobody anticipated, without writing a reader.
+- ⚠⚠ **The database IS the record, not a cache of one.** Every write goes through the API, which runs
+  the checks in the same transaction and rolls back on a firing one, so there is no earlier artifact
+  to rebuild it from and no path that writes it without being checked.
+- **`sweep export` beside it**, deterministic JSON into the campaign repo's `record/`, one file per
+  authored table plus a plan, an event log and the records per run — so the data stays git-diffable
+  and reviewable, which a binary is not, and a re-export of unchanged state is an empty diff.
+- ⚠ **The export is a rendering of the record, never an input to it.** The reverse is what produced
+  six headers from one producer.
 
 ---
 
@@ -1394,15 +1396,22 @@ satisfied a waiter.
 cells, and the cells behind it are exactly what is missing today. Its noise floor is five repeated
 identical encodes; **those are five rows, and nothing currently records them.**
 
-## ⚠⚠ WHAT LIVES IN THE DB AND WHAT STAYS A FILE
+## ⚠⚠ WHO MAY WRITE A TABLE — AUTHORED, OBSERVED, OR NEITHER
 
-**Three categories, and the current tree has no line between them.**
+**Everything is in the database; the categories say who may put it there, through which endpoint.**
+The archived harness spelled the first two as files and rows on disk and had no line between them.
 
-    FILE      a human AUTHORED it. It is INTENT. git history is the point, a diff is reviewable.
-    ROW       a machine OBSERVED it. It is a MEASUREMENT. Too numerous and too relational to read.
-    NEITHER   a machine can REGENERATE it from the other two. Do not persist it at all.
+    FILE      a person AUTHORED it, through a verb of their own. It is INTENT. The export is the
+              diff, and reviewing that diff is the point.
+    ROW       an agent OBSERVED it and posted it against the run it claimed. It is a MEASUREMENT.
+              No person's verb writes it.
+    NEITHER   the hub can DERIVE it from the other two on read. It is not persisted at all.
 
-| artifact | today | belongs | why |
+⚠ **The line is enforced, not conventional:** `@writer` on the schema names the one writer of each
+table, the rendered list below is generated from it, and an authoring endpoint and an agent's ingest
+path never touch the same table.
+
+| artifact | in the archived tree | belongs | why |
 |---|---|---|---|
 | `tools/hosts.json` | file | **file** | hand-authored topology; a diff is exactly what you want to review |
 | `scenarios.json` | file | **file** | the case set is authored, and its cross-product is the point |
@@ -1526,9 +1535,8 @@ outside the ladder is `UNREACHABLE`, not a number.
 omission.** A stored aggregate is indistinguishable from a measurement a month later, and this
 campaign has a median-over-windows that reversed a verdict. **Derive on read, and name the statistic
 in the output.**
-⚠ **A service per writer is the intended shape** — each owns its tables and nothing else writes them
-— but that is Phase 4's architecture question. **The model has to be right first**; ownership is easy
-to move and a wrong grain is not.
+⚠ **One writer per table is enforced in the hub**: an authoring router owns the FILE tables of its
+group and `ingest` owns the ROW tables, and nothing else writes either. See `ARCHITECTURE.md`.
 
 ## ⚠⚠ THE COMPARISON PRIMITIVE — the part that actually prevents the bug
 
@@ -1605,7 +1613,8 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
    it.** Not annotation — it is what makes the row readable a month later.
 7. **Provenance is a field**: `measured` / `derived` / `no-content`, plus `policy` where a decision
    overrode a measurement.
-8. **The store is rebuildable from the ledger**, so a schema change is a rebuild, not a migration.
+8. **The database is the record**, so a schema change is a migration and the export is what makes
+   one reviewable — there is no earlier artifact to rebuild it from.
 
 ---
 

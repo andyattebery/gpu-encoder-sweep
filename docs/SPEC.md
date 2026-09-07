@@ -1,96 +1,75 @@
 # The process: filling one cell of the lookup table
 
-<!-- M0: a verbatim copy of the campaign's FILL-A-CELL.md. The cut to current-rule-only is pending. -->
-
-**What this is.** The procedure for producing **one column** of the iso-quality lookup table
-(`RESULTS` §1) — one `(content_class, encoder_unit, scoring_height)`, which is the measurement key
-of **I2**. ⚠ *Not `(content class × codec × card)`; that shorter form is incomplete, and I2 says why.*
+**What this is.** The procedure for producing **one column** of the iso-quality lookup table — one
+`(content_class, encoder_unit, scoring_height)`, which is the measurement key of **I2**. *Not
+`(content class × codec × card)`; that shorter form is incomplete, and I2 says why.*
 
 > *An iso-quality lookup table: what settings on each card hit a fixed SSIMULACRA2 target, and what
 > that costs in fps and bytes.*
 
-⚠⚠ **THERE ARE TWO DELIVERABLES AND THE SECOND ONE SHAPES WHAT THIS PROCEDURE MUST RECORD.**
-`TDARR-TRANSCODE-PLAN.md` is the **build order** — one exact command per scenario, plus the bitrate
-logic that picks it. It consumes the lookup table but does not have its shape: it wants **ONE value
-per `(lane, host, step)`**, carrying a **provenance marker**, a **RESULTS citation**, and
-membership of its **codec's ladder** — and it may legitimately be `derived`, `no-content`, or a
-**policy decision that overrides the measurement**. See `DATA-MODEL.md`.
+**There are two deliverables, and the second one shapes what this procedure must record.** The
+**build order** is one exact command per scenario, plus the bitrate logic that picks it. It consumes
+the lookup table but does not have its shape: it wants **ONE value per `(lane, host, step)`**,
+carrying a **provenance marker**, a **citation**, and membership of its **codec's ladder** — and it
+may legitimately be `derived`, `no-content`, or a **policy decision that overrides the measurement**.
+See `DATA-MODEL.md`.
 
-Derived from the **B580 `av1_qsv` / `native-1080p-sdr` lane**, the first and only end-to-end
-execution of the full process (2026-08-30 → 2026-09-04, 420 scored cells). Shape from
-`RUNBOOK.md` §0–§6 and §3c; substance and corrections from `tasks/b580-lane.md`.
-
-⚠ **This document is the spec. It must be sufficient on its own** — if you need the archived tree to
-fill a cell, the spec is wrong and the fix goes here.
+**This document is the spec. It must be sufficient on its own** — if filling a cell needs anything
+outside it, the spec is wrong and the fix goes here.
 
 **How it is organised.** The invariants first: true on every card, before any procedure. Then two
 practices that are not stages. Then **the stages, numbered as `DATA-MODEL.md` numbers them**, each
 saying what it does, what it reads, what it writes, what is decided in it, what it refuses, and how
-it couples to the others — because the couplings run backward as often as forward, and every
-backward one has cost this campaign a re-run. The tables named are the ones `sweep/schema.sql`
-defines. **Terms are defined once, in `DATA-MODEL.md`'s Terminology table; the numbers a builder needs are
-in *The recipes*, at the end.**
+it couples to the others — because the couplings run backward as often as forward. The tables named
+are the ones `sweep/schema.sql` defines. **Terms are defined once, in `DATA-MODEL.md`'s Terminology
+table; the numbers a builder needs are in *The recipes*, at the end.**
 
 ---
 
 ## The invariants — true on every card, before any procedure
 
-**I1 · §4 IS A SET OF STANDALONE PER-CARD COLUMNS. IT IS NOT A COMPARISON.**
-**This campaign has drifted into comparison three times, and the B580 lane was the third** — it
-computed qsv-vs-vaapi and qsv-vs-nvenc numbers that are not the deliverable, and *"comparing to eta
-is what wasted days in this task."* ⚠ A fourth was nearly added when the ladder was almost placed to
-overlap the incumbent's range. **A cross-card number may be computed; it is not part of the
-deliverable.**
-✅ **The check is one line and it is free: NAME THE CELL THE RUN FILLS BEFORE LAUNCHING IT.** A
-comparison has no cell to name. All three drifts fail that question.
+**I1 · THE LOOKUP TABLE IS A SET OF STANDALONE PER-CARD COLUMNS. IT IS NOT A COMPARISON.**
+A cross-card number may be computed; it is not part of the deliverable. **The check is one line and
+it is free: NAME THE CELL THE RUN FILLS BEFORE LAUNCHING IT.** A comparison has no cell to name.
 
 **I2 · A SETTINGS VERDICT IS KEYED TO `(content_class, encoder_unit, scoring_height)`**, where
-`encoder_unit = (vendor, card, driver, frontend, codec)`. ⚠ **`(content class × codec)` — the form
-this rule is usually quoted in — is INCOMPLETE**, and every component the longer key adds was
-measured to matter: `av1_qsv` beats `av1_vaapi` by −6.85% BD-rate **on the same card**;
-`-compression_level` inverts sign between AMD and Intel; iHD 25.2.3 → 26.2.2 moved bytes 14/14.
-⚠⚠ **HOST IS NOT IN IT** — a ladder is per codec, not per node — **but host IS the shipping key**,
-and the two must not be merged. **`DATA-MODEL.md` opens with the full argument; it is the thing that
-keeps getting lost.** The window set is not a sample to economise on — **it IS the content class.**
+`encoder_unit = (vendor, card, driver, frontend, codec)`. **`(content class × codec)` — the form this
+rule is usually quoted in — is INCOMPLETE**, and every component the longer key adds was measured to
+matter: two frontends on one card differ by **−6.85% BD-rate**; `-compression_level` inverts sign
+between vendors; a driver step moved bytes **14/14**. **HOST IS NOT IN IT** — a ladder is per codec,
+not per node — **but host IS the shipping key**, and the two must not be merged. **`DATA-MODEL.md`
+opens with the full argument.** The window set is not a sample to economise on — **it IS the content
+class.**
 
 **I2b · THE SCORING HEIGHT IS SET BY THE KIND OF CLAIM, AND IT IS A DECISION — NOT A DEFAULT.**
 A **relative** claim (this rung beats that rung) survives a rescale: rung ranking flips 0–1 times in
 60–270 pairs. An **absolute** claim — hits target t, clears a bar, sits above a floor — does not:
-scores move 2.9–5.3 points and spans expand by a third, **worst encodes furthest**.
-⚠⚠ **THE PANEL WAS ONLY EVER ASKED ABOUT IN ONE LANE.** Measured across the committed scores:
-`standard` is **1080 × 684 rows** and `2d-animation` **1080 × 445**, one height and never another —
-the no-rescale height, which fell out of the output resolution. The `m4` leaf is the only one
-carrying both (**2160 × 339 and 1548 × 647**), because it is the only lane where the question was
-put. ✅ **The kids verdicts are probably safe anyway** — they were set by incumbent comparison, which
-is relative. ⚠ **But any ABSOLUTE number quoted for them, including a score target, is at a height
-nobody chose**, and fixing that costs a re-encode as well as a re-score, because the ledger stores
-scores and not encodes.
-**So: record the height AND why it was chosen, per lane, before scoring anything.** ✅ **Now a rule,
-not a per-lane choice: G1 — every lane scores at its device's panel height, `lane.score_height`.**
+scores move 2.9–5.3 points and spans expand by a third, **worst encodes furthest**. An absolute
+number quoted at a height nobody chose is unusable, and fixing it costs a re-encode as well as a
+re-score, because the store holds scores and not encodes. **So: record the height AND why it was
+chosen, per lane, before scoring anything** — which G1 makes a rule rather than a per-lane choice:
+every lane scores at its device's panel height, `lane.score_height`.
 
 **I3 · ADMISSIBILITY FIRST. A FAILURE EXCLUDES A CONFIGURATION; IT DOES NOT RANK IT.**
-`icq-control` is reported EXCLUDED, never "ranked last". A BD-rate over an inadmissible arm is a
-number with no meaning.
+A mode that cannot be inverted is reported EXCLUDED, never "ranked last". A BD-rate over an
+inadmissible arm is a number with no meaning.
 
 **I4 · SIZE AND QUALITY ARE ONE CRITERION — that is what `bd_rate` is.** Scoring them separately
-double-counts. Measure per window, then take a **MEDIAN**; a mean over windows has reversed a verdict
-in this campaign.
+double-counts. Measure per window, then take a **MEDIAN**; a mean over windows has reversed a verdict.
 
 **I5 · SPEED IS A SEPARATE CRITERION AND IT IS CHOSEN AFTER THE ISO-SCORE POINT.**
-⚠ **But measure it EARLY — see Stage 7.**
+But measure it **EARLY** — see Stage 7.
 
 **I6 · CAPABILITY AND SHIPPING ARE TWO TABLES.** State which question a table answers, in the table.
-The B580 produced both: `-preset 1` (capability) and `-preset 4` (shipping).
 
 **I7 · AN ABSENCE IS NOT A NEGATIVE RESULT.** Check the probe ran and its output is non-empty before
-reading meaning into it. ⚠ **A probe that did not run and returns a POSITIVE is worse** — nothing
-looks wrong. Failures here return **rc=0** routinely; **read stderr, never the exit status.**
+reading meaning into it. **A probe that did not run and returns a POSITIVE is worse** — nothing looks
+wrong. Failures here return **rc=0** routinely; **read stderr, never the exit status.**
 
 **I8 · RESEARCH THE PARAMETERS; DO NOT REVERSE-ENGINEER THEM FROM BYTE COUNTS.**
-Two B580 conclusions were overturned by reading ffmpeg's source: `-preset 1` is QSV's *quality* end
-(`MFX_TARGETUSAGE_BEST_QUALITY`), and **`-global_quality` alone selects ICQ, not CQP** — so 56 cells
-had been encoded in a mode already disqualified. Bytes at fixed quality conflate rate and quality and
-cannot settle either.
+What a flag selects is a question for the encoder's source: on one frontend `-global_quality` alone
+selects ICQ rather than CQP, and its `-preset 1` is the *quality* end. Bytes at fixed quality
+conflate rate and quality and cannot settle either.
 
 **I9 · A CAVEAT THAT EXISTS FOR ONE ARTIFACT IS A BUG REPORT, NOT DOCUMENTATION.**
 Warnings accumulate in three kinds, and only two of them belong in a doc:
@@ -99,15 +78,10 @@ Warnings accumulate in three kinds, and only two of them belong in a doc:
     an incident that could recur                              ->  make it a REFUSAL or a TEST
     a defect in ONE artifact                                  ->  FIX THE ARTIFACT, delete the note
 
-⚠⚠ **The third kind accumulates silently**, because deleting it requires someone to know the artifact
-was fixed, and nothing tracks that. **Worked example:** one library file carried its Dolby Vision RPU
-on a second video track. It produced an accepted-loss entry, a scan-every-stream rule and a
-paragraph of prose — and a reader of this campaign spent several exchanges treating **profile 7 as an
-open question**, because a footnote about one file implied a general problem. **P7 is in fact the
-most common DV profile in the library and the fork handles it.** Replacing the one file deletes all
-of it.
-⚠ **This is the whole reason for starting clean: not to carry constraints that no longer apply.**
-When a caveat is met, ask which of the three kinds it is **before** writing it down again.
+**The third kind accumulates silently**, because deleting it requires someone to know the artifact
+was fixed, and nothing tracks that — and a footnote about one file reads as a general problem for
+everyone after. When a caveat is met, ask which of the three kinds it is **before** writing it down
+again.
 
 ---
 
@@ -115,37 +89,32 @@ When a caveat is met, ask which of the three kinds it is **before** writing it d
 
 ### Prerequisites — establish, do not assume
 
-| | requirement | how it bit |
-|---|---|---|
-| **sample** | the class's reference set: a REFERENCE cut per window (lossless, **through the production chain**) and a SOURCE cut (`-c copy`) — Stage 0 | ⚠ **Quality cells encode from the reference cut, so they measure the ENCODER — the scalers and tonemappers never run in the scored path.** Throughput runs from the source cut. **Two pipelines, two inputs.** |
-| **chain** | the production filter graph per `(lane, host)`, **authored before the sample** — the reference cut is built through it, Stage 7 times it, and Stage 11 ships the same row | Modelled as Stage 11's output while Stage 0 read it: a cut cannot name a chain that does not exist yet. A spec defect from the 2026-09-06 cold read, not an incident |
-| **rig parity** | the measurement container is built from **production's image**; refuse on driver drift | A separate rig image drifted to a *different package* (`intel-media-va-driver` free 25.2.3 vs production's non-free 26.2.2) and **invalidated a whole dataset** |
-| **device** | address the card by **PCI slot**, never a render-node number | `renderD128`/`129` **inverted twice**, once across a reboot |
-| **ledger identity** | a distinct `node_label` per card in a multi-card box | Otherwise the cell keys collide with the other card's |
-| **driver** | pinned and recorded on every row; **it is a FACTOR — part of the measurement key**, a column of `encoder_unit` | 25.2.3 → 26.2.2 moved bytes **14/14** and shifted the **quality anchor** by **+2.5**; 26.2.2 → 26.2.4 was **inert**. Probe the step before spending on it. **A driver change is a new encoder unit, and the column starts again at Stage 1.** |
-| **the same harness on the node** | sha on both ends after every push; refuse a node already running one | The node copy drifted **five times**, twice silently, once producing a valid-looking grid that measured the wrong thing |
-| **quiet box** | a contention check before any timing run | ⚠ **Nothing enforces this.** The container boundary never did — both open the same device. Recorded as a gap. |
+| | requirement |
+|---|---|
+| **sample** | the class's reference set: a REFERENCE cut per window (lossless, **through the production chain**) and a SOURCE cut (`-c copy`) — Stage 0. **Quality cells encode from the reference cut, so they measure the ENCODER** — the scalers and tonemappers never run in the scored path — while throughput runs from the source cut. **Two pipelines, two inputs.** |
+| **chain** | the production filter graph per `(lane, host)`, **authored before the sample**: the reference cut is built through it, Stage 7 times it, and Stage 11 ships the same row |
+| **rig parity** | the measurement container is built from **production's image**, so the driver and the userspace are production's; refuse on drift. A separate rig image drifting to a different driver package invalidates the whole dataset |
+| **device** | address the card by **PCI slot**, never a render-node number |
+| **ledger identity** | a distinct `node_label` per card in a multi-card box, or the cell keys collide with the other card's |
+| **driver** | pinned and recorded on every row; **it is a FACTOR — part of the measurement key**, a column of `encoder_unit`. **A driver change is a new encoder unit, and the column starts again at Stage 1.** Probe the step before spending on it: one driver step moved bytes 14/14 and shifted the quality anchor, the next was inert |
+| **the same harness on the node** | the artifact a plan was built for is the artifact the agent reports; refuse a node already running one |
+| **quiet box** | no other active run on the machine during a timing run |
 
 ### Write BOTH empty tables first
 
-⚠⚠ **The B580 lane's single biggest process failure.** That §4 carries no fps column, that
-throughput lives in §4e, and that this lane's targets are **75/80/85** where other sections use
-70/75/80 — **all discovered late, and all of them determine the ladder.**
-
 **Table 1, the lookup column.** Write down before anything encodes: the **targets**, the **windows**
 (the class from Stage 0), the **columns** (setting · Mbps · fps), and **which question it answers** —
-capability or shipping. ⚠ **Derive the targets from card-independent sources** — the metric's own
+capability or shipping. **Derive the targets from card-independent sources** — the metric's own
 calibration, and this card's measured span. Reaching for another card's range is I1.
 **In the model these are `search`, `search_target` and the arms — Stage 2 writes them.**
 
 **Table 2, the build-order rows this lane will fill.** One per `(lane, host, step)`, and each needs
 a **provenance marker**, a **citation**, and a **setting that is a rung on its codec's ladder**.
-⚠ **Write the rows out empty, because they constrain the ladder too**: a shipping value that is not a
-rung cannot be cited, and the B580 lane had to add 30 cells purely so its *shipping* preset could
-invert its own targets — a criterion nobody had written down. ⚠ **A row may end up `derived`,
-`no-content` or `policy`** — those are legitimate outcomes, but they must be *chosen*, not defaulted
-into because the ladder missed. **In the model these are the `shipped` rows Stage 11 fills, and the
-shipping arm they will need is named in Stage 2.**
+**Write the rows out empty, because they constrain the ladder too**: a shipping value that is not a
+rung cannot be cited, and a ladder placed to invert the *capability* arm's targets will not invert the
+*shipping* arm's. **A row may end up `derived`, `no-content` or `policy`** — legitimate outcomes, but
+they must be *chosen*, not defaulted into because the ladder missed. **In the model these are the
+`shipped` rows Stage 11 fills, and the shipping arm they will need is named in Stage 2.**
 
 ### A run is rows before it runs
 
@@ -156,21 +125,18 @@ abandoned — and an append-only `run_event` log that the waiter reads instead o
 state is **derived** from its rows — planned, encoded, scored, timed, failed — so it cannot disagree
 with them. A run is `complete` only once its product has been verified against the plan, and a run
 marked complete with a cell still planned is refused. A failed cell carries its **stderr**, never the
-exit status alone. Two active runs on one host are refused; a run on a blocked host is refused with
+exit status alone. A timing run refuses to share its machine; a run on a blocked host is refused with
 the fix in the row; a run's unit must be in its host. **This is the whole "artifact must come home"
-group of refusals, and the typed-count and hand-run incidents, closed by construction.**
+group of refusals, closed by construction.**
 
 ### A two-cell smoke pass through the whole chain
 
-`encode → score → time → invert`, two cells, **~3 minutes of GPU**, before any stage runs at
-scale. **All three tool defects in the B580 lane were found by consuming the output, never by a dry
-run**, and every one made a completed measurement invisible: `--time` never fetched its CSV; the
-timing CSV had no `extra` column, so **every row resolved to the inadmissible arm**; and the spec
-never set `speed_excluded_windows`, so an exclusion two tests "proved" held only because someone
-happened to omit the window.
+`encode → score → time → invert`, two cells, **~3 minutes of GPU**, before any stage runs at scale —
+and **consume the output**, because a dry run finds none of it. Tool defects that leave a completed
+measurement invisible — a product never fetched, a column missing so every row resolves to one arm,
+an exclusion that holds only by accident — are found by reading what came back and by nothing else.
 
 ---
-
 ## The stages
 
 **Each stage answers one question.** It reads named tables, writes named tables or nothing, makes
@@ -181,11 +147,9 @@ probe outside it.
 
 ⚠⚠ **THE MANDATORY PATH, AND THE SEARCH.** Every column runs Stages 0, 1, 2, 5, 6, 7, 10, 10b and 11:
 **the base arm on every rung of the codec ladder**, scored, timed, and inverted on the lane's rule —
-about ninety cells and a few hours, and the only thing every shipped value in this campaign has ever
-come from. **Stages 3, 4, 8 and 9 are the search, and they run only when Stage 2 earned one**: a
+about ninety cells and a few hours, and the only path a shipped value may come from. **Stages 3, 4, 8 and 9 are the search, and they run only when Stage 2 earned one**: a
 screened setting that moved bytes beyond the noise floor on the class, with a mechanism worth
-testing. The one search that ran found the base arm best, tiles bought nothing, and the largest lever
-was catastrophic — so the search is the exception, entered where the screen pays for it.
+testing. The search is the exception, entered only where the screen pays for it.
 
 ```mermaid
 flowchart TD
@@ -223,7 +187,7 @@ flowchart TD
 
 | stage | must anticipate | because |
 |---|---|---|
-| **0 sample** | 11 ship | `measured` needs the lane represented in the class; the kids `standard` class had no SDR member |
+| **0 sample** | 11 ship | `measured` needs the lane represented in the class, and a class assembled for one lane can miss another lane's population entirely |
 | **0 sample** | 8 rank | the frame's strata are what rank reads per stratum; a missing stratum cost 1.5–2.9 cq |
 | **1 screen** | 10 invert | an anchor that is not MONOTONE cannot be inverted, so the mode is excluded here or never |
 | **2 candidates** | 4, 7, 11 | the targets and the shipping arm are named here because 4's ladders must span them and 7 must time them |
@@ -234,7 +198,7 @@ flowchart TD
 | **4 derive ladders** | 8, 10, 11 | overlap for `bd_rate`; span every target, else UNREACHABLE; include the codec rungs that could ship |
 | **6 score** | the viewing | scoring deletes the encode; the viewing must re-encode and keep |
 | **6 score** | 8, 10 | the height and the scorer build are in the key; changing either is a re-score AND a re-encode |
-| **7 time** | 11 | N\* and the shipping preset come from here; the B580's shipping answer was decided by the stage that ran last |
+| **7 time** | 11 | N\* and the shipping preset come from here, so the shipping answer can be decided by the stage that runs last |
 
 ### Stage 0 · Sample — frame, select, pin, materialise, verify
 
@@ -245,7 +209,7 @@ from. Half of it is defined and half is judgement, and the frame keeps the two a
    `standard` pair; the M4 HEVC set). Take the union of their populations from the inventory.
    **The definable half is the technical spread, and it comes from the inventory:** stratify on
    **source resolution class** (native 1080p against 4K-downscaled was the distinction that
-   mattered, not grain — `RESULTS` §3a) · **dynamic range** (the tonemap runs or it does not) ·
+   mattered, not grain) · **dynamic range** (the tonemap runs or it does not) ·
    **source codec** (the decode path, for the speed criterion) · **source type** (WEB against REMUX
    — a WEB source is pre-compressed); and **spread on the continuous ones** — **bitrate, as bits per
    pixel so resolutions compare**, with a window near each quantile of what reaches the encoder, and
@@ -293,27 +257,24 @@ re-run of everything after it**; the class is the key's content half; the strata
 reads per stratum; the served lanes decide whether Stage 11 may write `measured`. Backward: it needs
 the lane table (Coverage) and the inventory, and nothing else — it is the only stage with no
 measurement before it.
-**What bit.** The 7 kids windows missed well-lit grain-free live action, 40% of one lane's files
-(`RESULTS` §3a). `sopranos` left the 1080p class because the class was wrong, not to economise. A
-staged `interstellar.src.mkv` carried no DV RPU while its source did, and every checksum was clean.
-All four `standard` windows are 4K HDR remuxes; the SDR kids lane's population had no member.
 
 ### Stage 1 · Screen — which modes are admissible, and which settings the unit honours
 
 **Does.** Two things, both on real content of the class, and both before any search exists.
 
 **(a) The admissibility tests**, each a refusal recorded with the base it was taken under:
-1. **Does the encoder open in the mode this lane ships?** Verbatim stderr, not rc. *126 of 294
-   locate cells failed because `av1_qsv` cannot open in QVBR at all.*
+1. **Does the encoder open in the mode this lane ships?** Verbatim stderr, not rc. An encoder that cannot open in a mode fails
+   every cell that uses it — hundreds at a time in a locate pass.
 2. **Which rate-control mode is actually selected?** On QSV it is **implicit** — `-q:v` → CQP,
    `-global_quality` alone → **ICQ**, `-b:v`+`-maxrate` → CBR, `-b:v` alone → VBR. Read the source.
 3. **Is the quality anchor MONOTONE?** ⚠⚠ **Sweep at STEP 1 ON THE BINDING WINDOW**, ≥3 repeats.
-   A step-4 sweep on an easy window walks straight over a reversal and reports "monotone" — it did.
+   A step-4 sweep on an easy window walks straight over a reversal and reports "monotone".
    **A curve that doubles back cannot be inverted, so this is Stage 10's precondition, tested here.**
 4. **Does the card decode the codec?** One frame, per codec, read stderr. ⚠ **Counting decoded frames
    is a FALSE PASS** — software fallback produces frames too. **The answer is `decode_path` on every
    timing row, not a capability table** — the model refuses to hold one.
-5. **What is the quality range?** `av1_qsv` ends at **51**. A target past the encoder's range is
+5. **What is the quality range?** An encoder's range can end short of the ladder — one AV1
+   frontend ends at **51**. A target past the encoder's range is
    `UNREACHABLE` — an admissibility property, **not a missing measurement**.
 6. **Does it obey a rate request, where the lane has a cap?** *`ran` is not `usable`.*
 
@@ -328,8 +289,8 @@ midpoint, three repeats (V1); magnitude read against a noise floor of five ident
   card honours; it cannot exclude anything — inert on one clip is not inert. Only the INERT
   candidates need the remaining windows (`DATA-MODEL.md`, THE SAMPLE, rule 2).
 - ⚠⚠ **DO NOT CARRY A SCREEN MAGNITUDE INTO A LANE CONCLUSION.** The screen runs at the ladder
-  midpoint, which may be far outside the lane's operating range. Three different figures for one
-  flag were all correct at their own operating points.
+  midpoint, which may be far outside the lane's operating range. One flag can carry three different
+  magnitudes, each correct at its own operating point.
 - ⚠ **Speed verdicts from the screen are not reproducible** — 12 of 15 flipped across six screens on
   an idle box while **0 of 15** size verdicts did. The per-setting spread and the noise floor are the
   same magnitude. **Speed is Stage 7's.**
@@ -349,10 +310,6 @@ speed verdicts as evidence.
 **Couples.** Forward: Stage 2's survivor set; the anchor and mode for 3 and 5; **monotonicity for
 10**; the quality range, which is where a target becomes UNREACHABLE on the deliverable (t=75 on 5
 of 6 windows). Backward: only Stage 0.
-**What bit.** `-adaptive_b` read INERT under an unmet precondition and had to be re-screened under
-`-b_strategy 1` — where it was still inert, because the default was already 1. ICQ was reproducibly
-non-monotone on the binding window. `-global_quality` alone selected ICQ and 56 cells were encoded
-in a mode already disqualified.
 
 ### Stage 2 · The base arm, and whether a search is earned
 
@@ -393,17 +350,14 @@ and 9 exist only for the candidates named here; **7 times the base arm early, at
 candidate; 4's ladders must span the targets; 10 inverts at the shipping arm. Backward: **this is where "write both tables first" happens** — the
 targets, the columns and the shipping row are decided here because the ladder stage cannot satisfy
 a criterion nobody wrote down.
-**What bit.** The B580's targets were 75/80/85 where other sections used 70/75/80, discovered late.
-30 cells were added afterwards so the shipping preset could invert its own targets — a criterion
-that existed only in the build order's shape.
 
 ### Stage 3 · Locate — where each arm's bitrate lands (search only)
 
 **Does.** **Runs only when Stage 2 wrote candidate arms.** Encodes every arm at **one coarse anchor ladder shared by all** — the only place a shared
 ladder is correct — over the whole class, **encode only, never scored**. Its product is a bitrate
-map: measured, `-b_strategy 1` sits at **0.47–0.60x** the bitrate of `-b_strategy 0` at the same
-quantiser, so a shared ladder puts arms in near-disjoint bitrate ranges, and scoring the coarse cells
-directly would have left **7 of 7 windows below `bd_rate`'s four-point floor**.
+map. Arms are not comparable at the same quantiser: a frame-type flag measured **0.47–0.60x** the
+bitrate of its default at the same quantiser, so a shared ladder puts arms in near-disjoint bitrate
+ranges and scoring the coarse cells directly leaves every window below `bd_rate`'s four-point floor.
 
 **Reads.** `search`, `arm`, `arm_setting` · `search_coarse_rung` · the reference cuts.
 **Writes.** `encode` (bitrate; the file discarded) · `cell_failure`. The plan — `run` (stage
@@ -420,13 +374,13 @@ cells — send the arm set back to Stage 2, which is cheaper than finding out at
 **Does.** **Runs only when Stage 2 wrote candidate arms.** From the locate bitrates, places each arm's rungs on the range **all arms share**, per
 window, and checks the placement against **every consumer before Stage 5 spends the GPU**:
 
-| criterion | needed by | the B580 |
-|---|---|---|
-| ≥4 rungs inside the range the arms SHARE | Stage 8, `bd_rate` | ✅ designed in |
-| span EVERY target | Stage 10, else `UNREACHABLE` | ⚠ patched after — 30 cells |
-| span the targets **at the shipping arm** | Stage 11's shipping table | ⚠ patched after — 30 cells |
-| include the codec ladder's rungs | *not this ladder's job* — Stage 5 encodes the shipping arm on the whole codec ladder | ✅ by construction, since the mandatory path |
-| overlap the incumbent | *(not a requirement — the drift, I1)* | ⚠ nearly a third patch |
+| criterion | needed by |
+|---|---|
+| ≥4 rungs inside the range the arms SHARE | Stage 8, `bd_rate` |
+| span EVERY target | Stage 10, else `UNREACHABLE` |
+| span the targets **at the shipping arm** | Stage 11's shipping table |
+| include the codec ladder's rungs | *not this ladder's job* — Stage 5 encodes the shipping arm on the whole codec ladder |
+| overlap the incumbent | *(not a requirement — the drift, I1)* |
 
 ⚠⚠ **OVERLAPPING FOR BD-RATE AND SPANNING THE TARGETS ARE DIFFERENT REQUIREMENTS.** They do not
 conflict — **one wider ladder satisfies all of them.** Derive it from all criteria before encoding.
@@ -434,14 +388,14 @@ conflict — **one wider ladder satisfies all of them.** Derive it from all crit
 **Reads.** The locate `encode` rows with their `cell_setting` · `search_target` · `ladder_rung` (the
 codec's rungs) · the arms.
 **Writes.** `arm_ladder_rung` — rows carrying the locate run that produced them. ⚠ **Never into the
-search spec**: the old tree wrote derived ladders back into the hand-authored file, and after that
-nobody could tell which parts a person chose and which a tool computed.
+search spec**: machine output written into a hand-authored file leaves nothing that says which parts
+a person chose and which a tool computed.
 **Decides.** Nothing by hand. The floor of four is a constant of the method.
 **Refuses.** Fewer than four rungs for an `(arm, window)` · a ladder derived from a run that is not
 the locate run of the same search.
 **Couples.** Forward: 5 (the rungs), 8 (the shared range), 10 (the span), 11 (the rungs that can
 ship). **Backward: the most coupled stage in the process.** It must satisfy three later stages at
-once, and the B580 placed its ladder for one of them and patched it twice, at 60 cells.
+once, and a ladder placed for one of them is repaired only by encoding more cells.
 
 ### Stage 5 · Encode — the base arm on the codec ladder, always; the search's arms when earned
 
@@ -466,10 +420,8 @@ whose identity settings match no arm · a rung of the codec ladder the shipping 
 some member, checked before Stage 10 reads it · an incumbent arm with no scored cell at its anchor on
 some member.
 **Couples.** Forward: 6. Backward: 4's rungs; and **a class edited between Stage 3 and Stage 5
-changes coverage** — the B580's locate ran on 7 windows and its search on 6, and the verdict's n
-was written nowhere; now it is `run_window` and the verdict says *k of n*.
-**What bit.** The `extra` column went missing from a CSV and eight search arms collapsed into one
-indistinguishable group. `sweep.py` was behind on every node, five times.
+changes coverage** — which is why the run declares its windows in `run_window` and the verdict says
+*k of n*.
 
 ### Stage 6 · Score — the metrics, at the decided height
 
@@ -490,19 +442,16 @@ height the search did not declare · a score with no height (the DDL).
 viewing re-encodes its pairs and keeps them. Backward: **decide the yardstick before scoring**. The
 height, the statistic and the metric backend are in the cell key; changing any of them is a
 re-score, and since the encodes are deleted, a re-encode.
-**What bit.** SSIMULACRA2 moves up to 23 points with the rescale. A two-height run always ended in a
-traceback and the relay still reported success. `ms_ssim` was `0.0` in all 2,999 rows that carried
-it. The retired fork's `p5` read one rank low.
 
 ### Stage 7 · Time — the chain's throughput, measured early
 
 **Does.** Repeated whole-window timings of the **production chain** — decode, filters, encode — on
 the **source cut**, per arm; the first sample flagged warm-up and kept; the noise floor measured per
 run; **the decode path measured per window**; N\* by workers (concurrency); the regime by truncated
-legs (split). ⚠⚠ **SPEED WAS MEASURED LAST AND WAS THE DECISIVE CRITERION** on the B580: `-preset 4`
-is **+66.3% fps for +1.42% BD-rate** — 35x the effect for the price, and it is the shipping answer.
-Two arms timed at Stage 2's time would have given it. I5 says speed is chosen after the iso-score
-point; it does not say measure it last.
+legs (split). ⚠⚠ **SPEED CAN BE THE DECISIVE CRITERION**: a preset step measured
+**+66.3% fps for +1.42% BD-rate** — 35x the effect for the price — and it decided what shipped. Two
+arms timed at Stage 2's time give that answer. I5 says speed is chosen after the iso-score point; it
+does not say measure it last.
 
 **Reads.** The source cuts · `chain(lane, host)` — the production argv, authored before the sample and the same row Stage 11 ships
 · the arms to time: the base and the shipping arm at least · workers.
@@ -521,9 +470,6 @@ criterion; PARTITION by measured decode path.** A software-decode window is CPU-
 others are GPU-bound and one N\* cannot describe both — so it is reported beside the hardware
 windows, never averaged in and never dropped, and it stays in the efficiency ranking regardless
 (`DATA-MODEL.md`, THE SAMPLE, rule 3).
-**What bit.** `tos` was excluded from speed by an authored key that held only because the timing
-config happened to omit it. N\* = 3 against 4 is not resolvable at this precision — 1.85% apart inside
-N=4's own 2.81% spread — and must not be quoted as settled. The regime moved with a driver update.
 
 ### Stage 8 · Rank — efficiency per arm (search only)
 
@@ -541,20 +487,18 @@ floor; then a **MEDIAN** across windows, with the range and *k of n* stated; and
    already in the row — and it is the only way a dissent becomes visible.
 4. **A metric that INVERTS is a finding that needs a decision, never a tiebreak to average away.**
 5. **Report `mean`, `p5` and `min` always — they agree on the WINNER and disagree on the SIZE OF
-   THE WIN.** Computed by `bd_rate` over the B580 search, mean and p5 agree on sign in **9 of 9** arm
+   THE WIN.** Measured over one committed search, mean and p5 agree on sign in **9 of 9** arm
    pairs, but the magnitude differs by up to **2.7x** (+40.54% against +111.19%), so which one is
    quoted changes how strong a case looks.
    ⚠⚠ **AND WHEN A DECISION MATCHES *ON* A STATISTIC RATHER THAN RANKING BY IT, THE ANSWER CAN
-   INVERT** — §14f is the live instance: matched on the mean the B580 costs **+11% size**, matched on
-   p5 it **saves 7.4%**. **Same data, opposite sign, decided by an unjustified statistic.**
-   ⚠ *An earlier draft of this rule claimed they disagree on ~20% of arm pairs. That came from a
-   same-`cq` comparison — the method rule 2 forbids — and is withdrawn.*
+   INVERT** — one measured pair costs **+11% size** matched on the mean and **saves 7.4%** matched on
+   p5. **Same data, opposite sign, decided by an unjustified statistic.**
 6. **PSNR and SSIM never rank.** On this content they track SSIMU2 closely, so they add nothing; on
    the question they were tested against — denoised versus grain-kept — they ranked **opposite to the
    eye**. ⚠ `ssim` is additionally saturated: **tied on 76% of arm pairs**.
 
-**What the metrics actually do, computed over the committed cells — the shipped `-tune uhq`
-decision, BD-rate of uhq against no-tune, 6 windows:**
+**What the metrics actually do, computed over one committed search — BD-rate of a tune arm against
+its no-tune base, 6 windows:**
 
     ssimulacra2   -3.71%      butteraugli  -10.47%      vmaf   -32.97%
     ssimu2_p5     -9.65%      psnr_y       -10.08%      cambi  +61.07%   <-- INVERTS
@@ -562,8 +506,7 @@ decision, BD-rate of uhq against no-tune, 6 windows:**
 ⚠ **VMAF is not redundant and not a tiebreak.** It agrees on the winner and disagrees on strength by
 9x, because it is **saturated** — ±1 point across a comparison where SSIMU2 moves ±7.
 ⚠⚠ **CAMBI is the only genuine dissent, and it is consistent: 36 of 36 pairs worse**, median absolute
-delta **+0.385** on a 0.02–2.55 range, largest on smooth content and smallest on grain. **The tune
-decision never consulted it.** Within one arm's ladder every metric agrees with SSIMU2 (0–5%
+delta **+0.385** on a 0.02–2.55 range, largest on smooth content and smallest on grain. Within one arm's ladder every metric agrees with SSIMU2 (0–5%
 discordant pairs); across arms, direction usually agrees and magnitude spans 9x.
 
 **Reads.** `score` · `encode` (bitrate) · `cell_setting` and `arm` (which cell is which arm) ·
@@ -581,25 +524,22 @@ and Stage 11's.
 visible · matching *on* a statistic instead of ranking by it.
 **Couples.** Forward: 9, 10 (the winning arm), 11. Backward: 4's shared range; 0's strata and n; 6's
 every metric.
-**What bit.** Joining on `(encoder, quality)` pooled four arms and produced **+164.5%** where the
-real figure was ~7%; the comparison is a function that resolves the full key and refuses a surplus,
-not a `GROUP BY`.
 
 ### Stage 9 · Categorise — EFFICIENCY · SPEED · BOTH · NEITHER (search only)
 
 **Does.** **Runs only when a search was earned.** Per setting, arm against base: **efficiency** from Stage 8's median BD-rate; **speed** from
 Stage 7 within a decode path, read against that run's own measured spread. ⚠ **The labels carry no
 direction: read the sign.** An arm reads EFFICIENCY because that criterion *moved* — by +43.73%,
-catastrophically worse. **The category is an OUTPUT of the sweep, never an input**: on this
-campaign's own data `hevc_nvenc` p7 is efficiency, and `-compression_level` is a size lever on AMD
-and a speed lever on the B580.
+catastrophically worse. **The category is an OUTPUT of the sweep, never an input**: measured, an
+HEVC preset step is efficiency rather than speed, and `-compression_level` is a size lever on one
+vendor and a speed lever on another.
 **Reads.** Stage 8's reading, recomputed · `timing`, partitioned by `decode_path`.
 **Writes.** **NOTHING.**
 **Refuses.** A missing timing read as unchanged — **UNMEASURED** · a delta inside the spread.
 **Couples.** Forward: Stage 11 — settings that move efficiency set the iso-score operating point;
 settings that move speed only are chosen afterwards, for the shipping config.
 
-### Stage 10 · Invert — the §4 column, on the lane's decision rule
+### Stage 10 · Invert — the lookup column, on the lane's decision rule
 
 **Does.** Reads the lane's `decision_rule` and inverts on **whichever constraint binds**, per window,
 at the shipping arm (`search.shipping_arm_id` — the base, unless a candidate beat it), and at the
@@ -610,14 +550,14 @@ straddling pair, never extrapolated**:
   itself, through the lane's cap constant; no headroom is applied to a window — **the worst window
   deciding**. The score it lands at is reported, not targeted. A window still over the ceiling at
   `BOUND` is the unfixable tail; in production such a title goes to `bitrate-target-encode` and lands
-  over budget at `BOUND`. How every M4 value is chosen.
+  over budget at `BOUND`. This is the rule a capped lane uses.
 - **`incumbent`** — per window, the incumbent arm's score at its pinned anchor, at the panel, is the
   bar — Stage 5 encoded it on every member; the candidate's
   anchor is the one whose score crosses it, and the candidate wins only if it does so for fewer
-  bits. A relative claim, which survives a rescale. How every kids value is chosen.
+  bits. A relative claim, which survives a rescale. This is the rule a lane with an incumbent uses.
 - **`target`** — the anchor where the chosen statistic crosses the target from `search_target`;
   **UNREACHABLE** where the ladder does not straddle it. The target comes from the viewing, never
-  from another card. No lane uses this rule yet.
+  from another card.
 
 For every rule: the Mbps at the point, the fps from Stage 7, and whether the Mbps clears the cap.
 Two tables, each saying which question it answers (I6): **capability** at the best arm — the
@@ -633,8 +573,6 @@ search cannot serve — an `incumbent` lane without an incumbent arm, a `target`
 an incumbent arm unscored on a member.
 **Couples.** Forward: 11. Backward: 1 (monotone anchor), 2 (the rule's inputs, the height), 4 (the
 span), 7 (fps), 10b (the cap's constants).
-**What bit.** The 4K lane's operating point was chosen at `p4` and shipped at `p2` and nothing
-re-derived the anchor after the preset moved; `qp15` was never scored at either.
 
 ### Stage 10b · Calibrate — the constants the flow's per-title logic consumes
 
@@ -647,16 +585,16 @@ a `derived` one carries its inputs and its precision.
 | constant | what it is | provenance | from |
 |---|---|---|---|
 | **`CEILING`** | the device budget as a bitrate cap | `derived` | the user's *512 GB / ~50 h*, with its inputs and ±~10% |
-| **`MARGIN`** | the remux **skip threshold**: the saving the probe's encode must show over the source rate of the same windows before encoding beats a remux | `policy` | bounded below by the probe's own precision — under ~0.15 the skip call sits inside the noise for half the titles (`RESULTS` §19.8); 0.20 ships |
-| **`HEADROOM`** | the fraction of `CEILING` requested as `-b:v` in `bitrate-target-encode` so a **whole title** lands under the cap | `measured` | **the one full-length encode**: a library title through the production chain at the requested rate, and the ratio it delivers. A window cannot answer this; the incumbent 0.98 overshot on 15 of 15 windows and has never been measured on a title |
+| **`MARGIN`** | the remux **skip threshold**: the saving the probe's encode must show over the source rate of the same windows before encoding beats a remux | `policy` | bounded below by the probe's own precision — under ~0.15 the skip call sits inside the noise for half the titles |
+| **`HEADROOM`** | the fraction of `CEILING` requested as `-b:v` in `bitrate-target-encode` so a **whole title** lands under the cap | `measured` | **the one full-length encode**: a library title through the production chain at the requested rate, and the ratio it delivers. A window cannot answer this: a factor guessed from windows overshoots, and one such guess exceeded the cap on 15 of 15 windows |
 | **`RUNG_FACTOR`** | the bitrate ratio between adjacent rungs of the codec ladder | `measured` | the median over windows, from the base arm's scored ladder |
-| **`BOUND`** | the worst-quality rung `bitrate-target-encode` may fall to while chasing the cap; a title still over the cap there stays over budget at `BOUND` | `measured` | the population probe: per-title rates at the shipping anchor, projected to worse rungs by `RUNG_FACTOR` and capped at `CEILING`; `BOUND` is the smallest such rung at which the lane's **weighted mean** comes under `CEILING` (`RESULTS` §18.6a: qp18 over at 24.29, qp20 under at 20.48). The viewing may then confirm it on the class's hardest window and override as policy |
+| **`BOUND`** | the worst-quality rung `bitrate-target-encode` may fall to while chasing the cap; a title still over the cap there stays over budget at `BOUND` | `measured` | the population probe: per-title rates at the shipping anchor, projected to worse rungs by `RUNG_FACTOR` and capped at `CEILING`; `BOUND` is the smallest such rung at which the lane's **weighted mean** comes under `CEILING`. The viewing may then confirm it on the class's hardest window and override as policy |
 | **`HOST_THRESHOLD`** | the source rate below which a `>1080p` title is remuxed rather than encoded | `measured` | the population probe's results on the lane's titles |
 
-⚠ **`MARGIN` and `HEADROOM` were one constant in the first draft of this stage, and they are not:**
-one is a skip test against the *source*, the other a request against the *ceiling*, and only the
-second needs the full-length encode. ⚠ **`BOUND` is a budget computation over the population, not a
-quality floor on the class's worst window** — that is how qp20 was actually chosen.
+⚠ **`MARGIN` and `HEADROOM` are not one constant:** one is a skip test against the *source*, the
+other a request against the *ceiling*, and only the second needs the full-length encode.
+⚠ **`BOUND` is a budget computation over the population, not a quality floor on the class's worst
+window.**
 **Reads.** The base arm's `encode` rows on the codec ladder · `score` at the lane's height · the
 population probe's per-title rates · the full-length encode (`cut_kind = library`) · `lane`,
 `constant_scope`.
@@ -670,9 +608,6 @@ a policy constant with no reason · a derived constant without its inputs and pr
 `bitrate-target-encode` rows read `HEADROOM` and `BOUND`; the build order's per-title logic reads all
 six. Backward: it needs Stage 6's scored ladder, the population probe and the full-length encode —
 the two places the process reads whole titles, both to produce a number and never to route one.
-**What bit.** `-b:v ceiling*0.98` overshot on 15 of 15; four constants carried `measured` with
-nothing behind the word but a section number; and this stage's first draft calibrated the skip
-threshold from the full-length encode and left the request factor without a name.
 
 ### Stage 11 · Ship — one value per (lane, host, step)
 
@@ -681,14 +616,14 @@ and the production chain per `(lane, host)`; records **provenance** (`measured` 
 `no-content`), **who decided** (`measurement` · `policy`) and the reason; applies the constants Stage
 10b calibrated that admit the lane — `bitrate-target-encode`'s rate request is CEILING × HEADROOM and its bound is BOUND,
 and the row says so. ⚠ **A shipped anchor is a rung of its codec's ladder, and it was measured.** ⚠⚠ **Capability and
-shipping are two tables, and a shipping judgement is never baked into a capability column** —
-`RESULTS` §8 carried `cl0` into §4c that way.
+shipping are two tables, and a shipping judgement is never baked into a capability column.**
 **Routes by support.** Every host with a unit whose codec is the lane's (`host_unit`) gets a row for
-every step of the lane, or a `routing_exclusion` with a reason: a unit that supports a lane is routed.
-eta's AV1 was hardware, not policy, and the B580 now shares it. **Reads the deadline.** Content
+every step of the lane, or a `routing_exclusion` with a reason: a unit that supports a lane is routed —
+support is a hardware fact, and a policy reason for not routing is written as an exclusion.
+**Reads the deadline.** Content
 minutes per wall minute per `(lane, host)` at the shipped setting and N\*, from Stage 7's timing over
-the class, against the lane's floor — `lane.min_content_rate`, per lane because the M4 lanes
-tolerate slower conversion than the kids lanes. A row under the floor is refused; a floor with no
+the class, against the lane's floor — `lane.min_content_rate`, per lane, because lanes
+tolerate different conversion speeds. A row under the floor is refused; a floor with no
 timing behind it is **UNMEASURED, not unchanged**; a lane with no floor is reported and never refused.
 **Reads.** Stage 10's tables · 9 · 7 (N\*, the timing) · `host_unit` · `chain` (authored) · `ladder_rung` · `constant`,
 `constant_scope` ·
@@ -707,22 +642,20 @@ lane with a step neither routed nor excluded with a reason · routed and exclude
 under the lane's throughput floor, or with no timing behind it · a remux row that is not `fixed`.
 **Couples.** Forward: the build order is rendered from these rows; the viewing views these values.
 Backward: 0 (representation), 4 (the rungs that were measured), 7 (N\* and the shipping arm). ⚠⚠ **And
-nothing crosses to another lane.** Nine carried values were withdrawn in this campaign; a carry is a
-`derived` row with a reason, and the join makes it look different from a measurement.
-**What bit.** Two lanes ship values measured on another lane's content and neither said so. `cl0`
-was recommended for throughput and then inverted as if it were capability.
+nothing crosses to another lane.** A carry is a `derived` row with a reason, and the join makes it
+look different from a measurement.
 
 ### After the column · Render the build order
 
-**Does.** Generates `TDARR-TRANSCODE-PLAN.md`'s per-scenario commands from `shipped` × `chain` ×
+**Does.** Generates the build order's per-scenario commands from `shipped` × `chain` ×
 `lane` × `lane_step` × `host`, with the provenance and citations from the rows. The case set is a
 join, not a file: every `(lane, host, step)` in Coverage × hosts has a `shipped` row or an exclusion
 with a reason, and the generator's assertions check the generated command rather than a hand-written
 one.
 **Reads.** The decision tables, `lane`, `host`.
 **Writes.** The document — a rendering, like `DATA-MODEL.md`'s schema blocks.
-**Couples.** Consumes Stage 11 only. Replaces by construction the three doc checks that today keep a
-hand-written build order and a hand-written case set agreeing.
+**Couples.** Consumes Stage 11 only. Replaces by construction the doc checks a hand-written build order and a
+hand-written case set need to keep them agreeing.
 
 ### Before Stage 2, and beside the column · The viewing
 
@@ -734,8 +667,8 @@ metrics argue against it. The encodes are re-encoded from the reference cut and 
 one measurement whose instrument is eyes, and it runs **first**: for an `incumbent` lane the
 acceptance that says what ships today is acceptable is what Stage 2's incumbent arm names; for a
 `target` lane the acceptance a target comes from is what each target names. It is also what
-calibrates a metric: **CAMBI can become a veto only once someone has established what delta is
-visible on this content and this device**, and that has never been done for the 1080p lane.
+calibrates a metric: **a metric can become a veto only once someone has established what delta is
+visible on this content and this device.**
 **Reads.** Reference-path encodes, kept · the device · the lane the judgement is for.
 **Writes.** `viewing_verdict` — a person's verdict, a FILE.
 **Refuses.** A verdict on an encode that was discarded · an acceptance with no lane · a pair with
@@ -743,8 +676,6 @@ one encode.
 **Couples.** Forward: Stage 2 — a required input for `incumbent` and `target` lanes, and a search
 without it is refused; Stage 11 (a policy override with a reason); Stage 8's rule 4 (what an
 inverting metric means). Backward: Stage 6 deleted the encodes, so the viewing encodes its own.
-**What bit.** The only value in the 4K lane confirmed by eye is `qp15`, and it is `derived`; no
-viewing has ever run for the 1080p lane.
 
 ### Outside the column · The pre-pass probe
 
@@ -801,7 +732,7 @@ VMAF practice.*
 4. **Stored:** `ssimulacra2` mean · p5 · min; `butteraugli` max (infnorm); `vmaf`, `cambi`, `psnr_y`,
    `float_ssim` mean; each row with `height`, `recipe = S1` and `scorer_build` (FFVship version, ffmpeg
    build sha). **Deterministic:** FFVship is bit-deterministic on one GPU and libvmaf across thread
-   counts, both measured, so Phase 5's "the same" is exact.
+   counts, both measured, so the acceptance bar of "the same" is exact.
 
 *Incumbent recipe, lifted from the old scorer so it survives the archive; the only best-practice
 content in it is "same transform on both sides, at display resolution, named on the row".*
@@ -813,9 +744,9 @@ content in it is "same transform on both sides, at display resolution, named on 
 `[setting_id, value]` · the ffmpeg **version string**. The first 32 hex characters. **Excluded on
 purpose:** the ffmpeg build sha and the driver runtime (recorded on `run`, not identity — a rebuild
 was measured byte-identical), the host (not a factor), and `computed` or `default_resolved` settings.
-The unit's driver is inside `encoder_unit_id`, so a driver change is a new key. ⚠ **The new key will
-not equal the old key strings**; Phase 5 compares values by `(window, identity settings, height,
-metric, statistic, recipe)`, never by key. *Incumbent decisions on what is excluded; canonical-JSON
+The unit's driver is inside `encoder_unit_id`, so a driver change is a new key. ⚠ **These key strings do not equal the archived
+harness's**; the acceptance comparison matches on `(window, identity settings, height, metric,
+statistic, recipe)`, never on the key. *Incumbent decisions on what is excluded; canonical-JSON
 hashing is the ordinary way to content-address.*
 
 ### W1 · Window selection
@@ -857,7 +788,7 @@ vocabulary is incumbent.*
 ### T1 · Timing, the spread, and N\*
 
 **Five repeats per cell, the first discarded as warm-up and kept flagged.** The timed cut's length is
-the cut's own, recorded on it — the incumbent's B580 timing ran on 30 s cuts. Median by nearest rank;
+the cut's own, recorded on it; the archived campaign timed 30 s cuts. Median by nearest rank;
 `spread = (max − min) / median` of the four kept. Concurrency: sweep `N = 1, 2, 3, 4 …` until the
 aggregate stops rising; the aggregate is **total frames over batch wall**. **N\* is the smallest N
 within the noise band of the best, not the argmax** — the plateau is flat and the risk asymmetric.
@@ -912,11 +843,8 @@ the three quantiles in F1, the preset ends in B1 and the grammar in E1 are conve
 against, and it is machine-readable so coverage can be asserted rather than remembered. The checks
 the model already enforces are rendered at the end of `DATA-MODEL.md`.**
 
-**The invariants, in six groups**, collapsed from the refusal-shaped sites on the live path
-(`sweep.py` 100 · `encode_run.py` 72 · `settings_search.py` 22 · `migrate_ledger_heights.py` 11 ·
-`push_node.py` 8 · `stage_check.py` 7 · `codec_verdict.py` 6 · `analyze.py` 5 · `safe_rm.py` 5 ·
-`check_config_axes.py` 4).
-Many sites enforce one invariant — the profile-key-versus-machine confusion alone was four.
+**The invariants, in six groups**, collapsed from the refusal-shaped sites of the archived harness;
+many of those sites enforced one invariant between them.
 
 | group | what it protects |
 |---|---|

@@ -6,14 +6,13 @@ spec marks `by_construction` is closed. The process it implements is `SPEC.md`; 
 `DATA-MODEL.md`, rendered from `sweep/schema.sql`; the invariants are `refusals.json`. No status, no
 dates, no history live here.
 
-<!-- M0: sliced from the approved plan; the by_construction table and a tidy pass are pending. -->
 ### The shape
 
 ```
 laptop                       nas-01 (always on)                       GHCR              nodes
   sweep CLI ── REST/TLS ──►  hub: FastAPI + SQLite (the record)        hub image          media-01: encode + score containers
   (thin: calls, prints)        checks on every write · planner ·       node-encode        htpc-01:  encode container (podman)
-  this repo ◄── export ──     builder · ingest · analysis · render     node-score         eta:      native encode agent (pyz)
+  campaign repo ◄─ export ─   builder · ingest · analysis · render     node-score         eta:      native encode agent (pyz)
   record/                      Redis behind it: queue · heartbeats                        eta-wsl:  score container
                                share (pool path, bind-mounted):        CI builds and       agents: long-poll /claim, pull inputs
                                temp/harness/{runs,refsets}             pushes on tags      from the share, post records + events
@@ -22,8 +21,8 @@ laptop                       nas-01 (always on)                       GHCR      
 - **The hub's database is the record.** Every write goes through the API, and the API refuses a
   write that would make a check fire — the same `x_*` views and script checks `model_check.py`
   proves today, run inside the hub in a transaction. `sweep export` pulls authored intent, plans,
-  events, records and calibrated constants into `record/` in this repo as deterministic JSON, so git
-  history, review by diff and the Phase 5 comparison stay possible; the SQLite file lives in the
+  events, records and calibrated constants into `record/` in the campaign repo as deterministic JSON,
+  so git history, review by diff and the acceptance comparison stay possible; the SQLite file lives in the
   compose data directory the backup role already covers.
 - **One command builder, in the hub.** Settings + host + `host_unit.device` + frontend become argv
   at plan time; an agent executes what it is given and composes no flags. Verdicts (V1), N\* (T1),
@@ -45,7 +44,7 @@ laptop                       nas-01 (always on)                       GHCR      
 | image | base | adds | runs on |
 |---|---|---|---|
 | `ghcr.io/andyattebery/gpu-encoder-sweep-hub` | `python:<pinned>-slim` | the package with its `hub` extra (`fastapi`, `uvicorn`, `redis`), installed by uv from the lock file | nas-01 |
-| `…-node-encode` | `ghcr.io/haveagitgat/tdarr_node:<the tag the tdarr role pins>` — production's image, so the VAAPI driver and Mesa are production's (the sweepbox lesson) | python3; the agent; the linux64 portable jellyfin-ffmpeg from `github.com/andyattebery/jellyfin-ffmpeg` releases at a pinned tag | media-01, htpc-01 |
+| `…-node-encode` | `ghcr.io/haveagitgat/tdarr_node:<the tag the tdarr role pins>` — production's image, so the VAAPI driver and Mesa are production's | python3; the agent; the linux64 portable jellyfin-ffmpeg from `github.com/andyattebery/jellyfin-ffmpeg` releases at a pinned tag | media-01, htpc-01 |
 | `…-node-score` | `nvidia/cuda:13.3.1-runtime-ubuntu26.04` (FFVship needs libavutil ≥ 7, per `ffvship/Dockerfile.cuda`) | FFVship and `libvship.so` from a build stage at Vship v5.1.0; the same jellyfin-ffmpeg build (`libvmaf_cuda`); python3; the agent | media-01, eta-wsl |
 
 The native Windows agent is the same package, run by the boot task as `uvx --from
@@ -53,11 +52,14 @@ git+https://github.com/andyattebery/gpu-encoder-sweep@<tag> sweep-node serve`; u
 dependencies and the interpreter, and updating it is the role bumping the tag. A plan names the
 artifact it was built for — the image digest, or the package version and git sha `sweep-node`
 reports — as the target host's agent last reported it, and the hub hands a run only to an agent
-whose heartbeat still reports it; the drift that bit five times cannot happen silently. The
+whose heartbeat still reports it, so a node running code the plan was not built for is refused
+rather than silently measured. The
 infrastructure repo pins the GHCR tags and the git tag its stacks and tasks run; `harness_version`
 on every run is that sha.
 
-### Schema changes (M1, each with fixture rows, a mutation and a DDL refusal)
+### Schema changes the architecture requires
+
+Each lands with fixture rows, a mutation case and a DDL refusal.
 
 | change | why |
 |---|---|
@@ -69,7 +71,6 @@ on every run is that sha.
 | `scorer` (reference, FILE): host, `ffvship` argv, `score_ffmpeg` argv, `metric_backend ∈ {libvmaf, libvmaf_cuda}`, `gpu_id`, `cache_dir`; a score run's host must have a scorer row | scoring on more than one host |
 | `scorer_equivalence` (measurement, ROW, `@writer equivalence`): run_a, run_b, metric, statistic, cells, max_abs_delta, `exact`; `x_search_mixed_scorers_without_equivalence`: a search whose score rows carry two `scorer_build`s with no equivalence marked `exact` for `ssimulacra2` and `butteraugli` | parallel scoring across scorers only where the instruments are proven the same |
 | `host.machine`, `host.local_view`, `host.share_root`; a `nas-01` host row with no units; `run.artifact`; `run_event.by ∈ {hub, agent}` | runtimes on one machine; the share per host; a plan and an agent agree on the code that ran; events say who wrote them |
-| `refusals.json` `id-scorer-in-the-key`: `how` names the `score` PK `(recipe, scorer_build)`, not K1 | K1 deliberately excludes the scorer build |
 
 ### The verbs — `sweep <verb>`, each an endpoint
 
@@ -111,7 +112,7 @@ statistic for libvmaf; writes `scorer_equivalence`) · `time [--workers 1,2,3,4]
 
 **Read-only**: `check` · `status` (answers from the hub's state; a silent agent is reported silent,
 so a downed node cannot kill it) · `rank` · `categorise` · `invert` · `render [--check]` (the build
-order's generated regions, recipe E1, written into this repo by the CLI) · `export` · `import-legacy`
+order's generated regions, recipe E1, written into the campaign repo by the CLI) · `export` · `import-legacy`
 · `compare-legacy`.
 
 ### The control plane — the hub's agent API, Redis behind it, the share beside it
@@ -193,7 +194,7 @@ with `is_warmup`).
   `butteraugli` max, `vmaf`/`cambi`/`psnr_y`/`float_ssim` mean, `recipe`, `scorer_build`),
   `step_trace`, `timing`; derived tables (`setting_verdict`, `arm_ladder_rung`, `constant_value`) are
   written by the hub's own verbs.
-- **The export** (`record/` here): `authored/<table>.json`, `runs/<id>/plan.json`,
+- **The export** (the campaign repo's `record/`): `authored/<table>.json`, `runs/<id>/plan.json`,
   `runs/<id>/events.jsonl`, `runs/<id>/records/*.json`, `constants.json`, `openapi.json` —
   deterministic ordering, so a re-export of unchanged state is an empty diff.
 
@@ -212,14 +213,14 @@ with `is_warmup`).
 | `sweep/hub/exchange.py` | the share in each host's spelling; the hub's bind-mounted view; `publish`/`pull` with sha both ends |
 | `sweep/hub/artifact.py` | records the artifact each agent reports (image digest, or package version and sha) and pins it into plans |
 | `sweep/hub/analysis.py` | rank (per window `bd_rate` over the shared range → median, k of n, per stratum), categorise (per decode path, UNMEASURED), invert on `lane.decision_rule` (tightest straddling pair, from `analyze.py:324`), content rate, screen verdicts, `derive_ladders` (from `settings_search.py:299 locate_ladders`), calibrate (BOUND from `m4_routing.py:57-102`), equivalence, the comparison primitive |
-| `sweep/hub/render.py`, `sweep/hub/legacy.py`, `sweep/hub/export.py` | E1; `import-legacy` and `compare-legacy` (the CSVs uploaded by the CLI from this repo); the deterministic export |
-| `sweep/cli/__main__.py` | `sweep`: one subparser per verb, `httpx` to the hub, prints replies, exits 1 on `REFUSING`; `export`, `render` write into this repo; run as `uvx --from git+…@<tag> sweep` or `uv tool install` |
+| `sweep/hub/render.py`, `sweep/hub/legacy.py`, `sweep/hub/export.py` | E1; `import-legacy` and `compare-legacy` (the campaign repo's committed CSVs, uploaded by the CLI); the deterministic export |
+| `sweep/cli/__main__.py` | `sweep`: one subparser per verb, `httpx` to the hub, prints replies, exits 1 on `REFUSING`; `export`, `render` write into the campaign repo; run as `uvx --from git+…@<tag> sweep` or `uv tool install` |
 | `sweep/node/{agent,ffm,scoring,timing,pool,records}.py` | above; the same package in both node images and, via `uvx`, natively on eta |
 | `sweep/schema.sql`, `sweep/model_check.py` | unchanged in role: the schema is the source, the proof and the doc rendering stay |
 | `docker/Dockerfile.hub`, `docker/Dockerfile.node-encode`, `docker/Dockerfile.node-score` | the images above; `requirements-hub.txt` is the only place third-party packages are pinned |
 | `.github/workflows/ci.yaml`, `images.yaml` | tests + `model_check --mutate` + docs `--check` + integration against a Redis service; build and push the three images to GHCR on main and tags (the FFVship CUDA build stage cached); a tag is the unit of deployment for images and for `uvx` alike |
 
-Lifted verbatim, cited in `ARCHITECTURE.md`: `parse_progress` (`sweep.py:1013`), `nearest_rank`
+Lifted verbatim from the archived harness, cited at the call site: `parse_progress` (`sweep.py:1013`), `nearest_rank`
 (`:1065`), `parse_ffvship_json` (`:1083`), `rescale_lossless` (`:1879`), `libvmaf_graph`/`score_libvmaf`
 (`:2266`, `:2286`), `can_hw_decode` (`:2377`), `content_hash` (`:3838`), `measure_noise_floor`
 (`:3409`), N\* (`encode_run.py:1421`), the sha-on-both-ends rule (`push_node.py:105`), the FFVship
@@ -228,16 +229,13 @@ not lifted: the queue makes them unnecessary.
 
 ### Scoring on more than one host
 
-"Scoring is centralised on media-01" (`RUNBOOK.md:31`, `CLAUDE.md:194`, `RESULTS` §1) rested on
-two facts: FFVship existed nowhere else, and the nodes carried different libvmaf builds. The rewrite
+The campaign harness centralised scoring on one host. That rested on two facts: FFVship existed nowhere else, and the nodes carried different libvmaf builds. The rewrite
 closes the second by construction — every score row carries `scorer_build`, and the store refuses
 to mix scorers on one search without a measured equivalence — and the node-score image closes the
-first: the same FFVship and the same `libvmaf_cuda` build on media-01-score and eta-wsl. The
-statement is superseded in the routers and gets its §11 entry.
+first: the same FFVship and the same `libvmaf_cuda` build on media-01-score and eta-wsl.
 
 **The acceptance bar is bit-identical, and the record says it is fair:** FFVship is bit-deterministic
-on one GPU, every frame, raw JSON sha equal across runs (`tasks/scoring-optimization.md`, 2026-09-03
-18:57). With one image on both scorers the only variable is the GPU, Ampere against Blackwell, for
+on one GPU, every frame, raw JSON sha equal across runs (measured on the archived harness). With one image on both scorers the only variable is the GPU, Ampere against Blackwell, for
 FFVship and `libvmaf_cuda` alike, unknown until measured. **The rule:** a search is scored by one
 scorer unless `scorer_equivalence` is `exact` for `ssimulacra2` and `butteraugli` between the two;
 then its cells may be split. Different searches may always go to different scorers — eta-wsl
@@ -252,9 +250,103 @@ only when a policy asks; by default they never do. **Cross-cell concurrency on e
 No endpoint takes a count, a device, a directory, a height or a card name as free input: the count
 is `len(cells)`; the device comes from `host_unit`; the height from `search.score_height`; the unit
 from the run row; nothing but the API can write the store; an agent runs only what its claim hands
-it, for the artifact the plan names. `ARCHITECTURE.md` carries the full table, one row per refusal
+it, for the artifact the plan names. The table below carries one row per refusal
 id; `test_refusals.py` asserts every `by_construction` id appears in that table and that no field
 named `count`, `device`, `height` or `directory` exists on any request body in the OpenAPI document.
+
+The other twenty-five refusals are not closed here: `check` ones are `x_*` views the store runs on
+every write, and `process` ones are rules a stage applies. This table is only the class the shape
+itself makes impossible.
+
+**`identity_and_provenance`**
+
+| refusal | what it protects | why it cannot happen |
+|---|---|---|
+| `id-no-cross-card-fallback` | identity never falls back to another card's tool | the unit is `run.encoder_unit_id`, taken from the catalogue at plan time; an agent reports its identity but never names a unit, and `x_run_unit_not_on_host` keeps it in its box |
+| `id-device-by-slot` | the card is addressed by PCI slot | `host_unit.device` is written once by `add-unit` and read by the builder; no request body and no plan carries a device, and the DDL refuses a render-node number |
+| `id-record-matches-profile` | a record written for another node is refused | a record is posted against the run that was claimed and ingested under its unit by foreign key; there is no file to mis-attribute |
+| `id-scorer-in-the-key` | the metric backend is part of the scorer's identity | `add-scorer` takes the build strings from the agent's `identify`, never typed, and `score`'s primary key carries `scorer_build` |
+| `id-scoping-reaches-every-builder` | scoping reaches every command builder | `sweep/hub/build.py` is the one builder and it reads `host` and `host_unit`; an agent composes no flags, so there is no second builder to miss |
+| `id-a-constant-says-how-its-value-was-decided` | a constant carries the provenance of its value | `add-constant` refuses a value on a `measured` constant and a `policy` one without `--reason`; `calibrate` is the only writer of `constant_value`; `x_measured_constant_never_calibrated` |
+
+**`admissibility`**
+
+| refusal | what it protects | why it cannot happen |
+|---|---|---|
+| `adm-read-stderr` | read stderr, never the exit status | a failed cell is posted as a failure record carrying stderr; `cell_failure.stderr` is NOT NULL and `rc` gates nothing |
+| `adm-guards-are-per-vendor-and-codec` | a capability verdict is scoped to (vendor, codec) | `setting_verdict` and `arm_setting` are keyed by `encoder_unit`; no verb takes a card name or a vendor string |
+| `adm-no-silent-fallback` | an unrecognised backend, codec or encoder refuses | enum CHECKs and foreign keys run inside the write transaction; the reply is a 422 `REFUSING`, and there is no default to fall back to |
+| `adm-exclude-with-a-reason` | a wholly inadmissible block is excluded with a written reason | `setting_verdict.reason` is required when the verdict is EXCLUDED, and `exclude-route` requires one too |
+
+**`measurement_validity`**
+
+| refusal | what it protects | why it cannot happen |
+|---|---|---|
+| `val-software-decode-is-not-hardware` | a software-decoded number is never averaged into a hardware one | the agent measures the decode path per window from stderr signatures; `timing.decode_path` is NOT NULL and the analysis partitions on it |
+| `val-none-is-not-zero` | "not given" and "explicitly serial" stay distinct | typed request bodies over STRICT columns; nothing between agent and store is a blank field in a text file |
+| `val-discard-the-warmup-sample` | the warm-up sample is flagged, not silently dropped | the agent posts every sample with `is_warmup`; the content-rate read filters it |
+| `val-never-compare-encodes-by-hash` | framemd5 for pixels, bytes for size | `cut.content_sha` is a frame hash by construction; the exchange shas files to prove a transfer and nothing compares encodes |
+| `val-real-content-not-synthetic` | screens run on real content of the class | every cell names a cut, and every cut names a title; `v_setting_unit_reading` needs the whole class before it will say INERT |
+
+**`the_artifact_must_come_home`**
+
+| refusal | what it protects | why it cannot happen |
+|---|---|---|
+| `art-extra-distinguishes-the-arms` | every field in the cell key survives into every reading | settings are `cell_setting` rows read through the comparison primitive; there is no CSV column to lose |
+| `art-move-stale-output-aside` | a previous output is never mistaken for this run's | products are rows under a new `run_id`; there is no whole-file producer, and a posted record is idempotent rather than overwriting |
+| `art-wait-on-the-artifact-not-the-log` | wait on the artifact, not a log, and detect a dead job | `wait` is the hub's own loop over `v_run_progress` and the heartbeat TTL; nothing reads an agent's log |
+| `art-check-staging-before-copying-into-it` | a leftover staging directory is checked before use | the share is addressed as `runs/<run_id>/`, allocated per run, and a cell is addressed by its key |
+| `art-never-glob-a-shared-directory` | drive from recorded paths, never a glob | the plan names every input path in the host's spelling, and the exchange copies by name |
+| `art-file-by-header-fingerprint` | an arriving table is filed by its content, not by the operator | nothing arrives as a table: an agent posts records to `/runs/{id}/records` and ingest maps them to rows |
+
+**`orchestration`**
+
+| refusal | what it protects | why it cannot happen |
+|---|---|---|
+| `orc-the-orchestrator-is-make` | node-touching work has one entry | the only path to a node is enqueue → claim; an agent runs what its claim hands it and has no other input |
+| `orc-host-wiring-is-not-the-descriptors` | binaries and devices come from the host profile | they are `host` and `host_unit` columns; the plan carries argv the builder already resolved, and no request body takes a binary or a device |
+| `orc-the-invocation-is-committed` | the invocation exists afterwards; the count is derived | the run and its planned cells are the invocation, exported to `record/`; the count is `len(cells)` and no endpoint accepts one |
+| `orc-status-must-not-die-on-a-downed-node` | status is read-only and survives an unreachable node | `status` answers from the store and the heartbeat TTL; a silent agent is reported silent, which is a different answer from zero |
+
+**`the_search`**
+
+| refusal | what it protects | why it cannot happen |
+|---|---|---|
+| `search-one-ladder-per-candidate-and-window` | a ladder is per (arm, window) | `arm_ladder_rung` is keyed that way, written only by `derive-ladders` from the search's own locate run |
+| `search-range-from-admissible-arms-only` | the shared range is set by admissible arms only | `x_arm_setting_not_honoured` — an arm carrying an unhonoured setting cannot exist to widen it |
+| `search-speed-partitions-by-measured-decode-path` | speed aggregates within a measured decode path | the path is measured per window and stored on the timing row; no endpoint accepts a window-exclusion list |
+| `search-admissibility-excludes-never-ranks` | an inadmissible arm is excluded, never ranked last | it cannot enter the search, and `rank` reads its arms from the store |
+| `search-separate-ledger-for-unranked-rungs` | rungs a ranking never saw stay separate | extension rungs are `ladder_rung` rows of the codec ladder, a different table from `arm_ladder_rung` |
+
+### Testing
+
+`make check` is the gate: the named unittest modules, `sweep/model_check.py --mutate` (every check
+fires on its negative case) and `--check` (the rendered regions of `DATA-MODEL.md` are current).
+Modules are named, never discovered. Above that:
+
+- **Hub tests run in-process** under the FastAPI test client with `FakeQueue` and a temporary store,
+  so every verb, every refusal and every ingest path is covered without a container.
+- **Every refusal has a test that names it**, and `test_refusals.py` asserts coverage against
+  `refusals.json`: every `by_construction` id appears in the table above, every `check` id maps to an
+  `x_*` view the model proves, and no request body carries a `count`, `device`, `height` or
+  `directory` field in the OpenAPI document.
+- **The integration suite** exercises `RedisQueue`, the agent protocol and the exchange against a
+  Redis service container — in CI on every push, locally under `make integration` with Docker.
+- **Mutation checking**: a suite that cannot fail on a deliberate break is not evidence.
+
+### The acceptance procedure
+
+The harness is accepted when it reproduces the campaign's committed values, not when its tests pass.
+
+1. `import-legacy` loads the archived harness's committed CSVs for the B580 `av1_qsv` column;
+   `materialise --adopt` registers the existing cuts by content hash and refuses a differing one.
+2. The same cells are re-encoded and re-scored under recipes S1 and K1 on the same reference pixels.
+3. `compare-legacy` requires **exact** equality for every stored statistic — the scorers are
+   bit-deterministic on one GPU, so "the same" means the same number, not a tolerance.
+4. **Timing is compared as ratios**, never as absolute seconds: the box, the driver and the
+   contention are not the archived run's.
+5. A search may be scored by two scorers only once `equivalence` has measured them `exact` for
+   `ssimulacra2` and `butteraugli`; until then one scorer per search.
 
 ---
 
