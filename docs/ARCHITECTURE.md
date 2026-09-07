@@ -45,7 +45,7 @@ laptop                       nas-01 (always on)                       GHCR      
 |---|---|---|---|
 | `ghcr.io/andyattebery/gpu-encoder-sweep-hub` | `python:<pinned>-slim` | the package with its `hub` extra (`fastapi`, `uvicorn`, `redis`), installed by uv from the lock file | nas-01 |
 | `…-node-encode` | `ghcr.io/haveagitgat/tdarr_node:<the tag the tdarr role pins>` — production's image, so the VAAPI driver and Mesa are production's | python3; the agent; the linux64 portable jellyfin-ffmpeg from `github.com/andyattebery/jellyfin-ffmpeg` releases at a pinned tag | media-01, htpc-01 |
-| `…-node-score` | `nvidia/cuda:13.3.1-runtime-ubuntu26.04` (FFVship needs libavutil ≥ 7, per `ffvship/Dockerfile.cuda`) | FFVship and `libvship.so` from a build stage at Vship v5.1.0; the same jellyfin-ffmpeg build (`libvmaf_cuda`); python3; the agent | media-01, eta-wsl |
+| `…-node-score` | `nvidia/cuda:13.3.1-runtime-ubuntu26.04` (FFVship needs libavutil ≥ 7, per `ffvship/Dockerfile.cuda`) | FFVship and `libvship.so` from a build stage at Vship v5.1.0 (from Codeberg, the source; GitHub is a stale mirror) — **the version the committed values were scored with, pinned on purpose**: a newer tag is a new `scorer_build`, which the acceptance comparison cannot be run across; the same jellyfin-ffmpeg build (`libvmaf_cuda`); python3; the agent | media-01, eta-wsl |
 
 The native Windows agent is the same package, run by the boot task as `uvx --from
 git+https://github.com/andyattebery/gpu-encoder-sweep@<tag> sweep-node serve`; uv resolves the
