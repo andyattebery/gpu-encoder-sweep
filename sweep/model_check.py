@@ -400,10 +400,10 @@ INSERT INTO cell_setting VALUES ('t-tng','qsv.preset','4','identity'),('t-tng','
  ('t-parks','qsv.preset','4','identity'),('t-parks','qsv.b_strategy','0','identity'),('t-parks','qsv.q','24','identity'),
  ('t-tos','qsv.preset','4','identity'),('t-tos','qsv.b_strategy','0','identity'),('t-tos','qsv.q','24','identity');
 INSERT INTO encode VALUES ('t-tng',60000000,8000.0,1439,60.0,'hardware',0),('t-parks',30000000,4000.0,1439,60.0,'hardware',0),('t-tos',40000000,5300.0,1439,60.0,'software',0);
-INSERT INTO timing (cell_key, workers, repeat_index, fps, wall_s, decode_path, is_warmup, noise_floor_pct) VALUES
- ('t-tng',1,0,640.0,2.2,'hardware',1,2.8),('t-tng',1,1,690.0,2.1,'hardware',0,2.8),('t-tng',1,2,700.0,2.05,'hardware',0,2.8),
- ('t-parks',1,0,700.0,2.0,'hardware',1,2.8),('t-parks',1,1,720.0,2.0,'hardware',0,2.8),
- ('t-tos',1,0,60.0,24.0,'software',1,2.8),('t-tos',1,1,62.0,23.2,'software',0,2.8);
+INSERT INTO timing (cell_key, workers, repeat_index, fps, wall_s, frames, decode_path, is_warmup, noise_floor_pct) VALUES
+ ('t-tng',1,0,640.0,2.2,1439,'hardware',1,2.8),('t-tng',1,1,690.0,2.1,1439,'hardware',0,2.8),('t-tng',1,2,700.0,2.05,1439,'hardware',0,2.8),
+ ('t-parks',1,0,700.0,2.0,1439,'hardware',1,2.8),('t-parks',1,1,720.0,2.0,1439,'hardware',0,2.8),
+ ('t-tos',1,0,60.0,24.0,1439,'software',1,2.8),('t-tos',1,1,62.0,23.2,1439,'software',0,2.8);
 
 -- the screen, on ONE window: b_strategy HONOURED; adaptive_b INERT under a base that is itself measured
 INSERT INTO cell VALUES ('s-bs0','b580-qsv-av1-screen','tng','reference'),('s-bs1','b580-qsv-av1-screen','tng','reference'),('s-ab1','b580-qsv-av1-screen','tng','reference');
@@ -510,7 +510,7 @@ SCRIPT_CHECKS = OrderedDict([
 ])
 
 DDL_ENFORCED = [
-    "a score row always names its height and its score run; a timing row always names its decode path and worker count",
+    "a score row always names its height and its score run; a timing row always names its decode path, worker count and frame count",
     "a score run names the run it scores, and no other stage has a parent",
     "a shipped row's (lane, step) is one of the lane's steps",
     "`measured` needs an evidence class; `policy` needs a reason; a `classified` cut check needs a reason",
@@ -835,6 +835,8 @@ MUTATIONS = [
     ("a screen encode short of its cut's frames -- the screen has no search to join through",
      "UPDATE encode SET frames = 1000 WHERE cell_key = 's-p1'",
      "x_encode_short_of_frames"),
+    ("a timing leg short of its cut's frames", "UPDATE timing SET frames = 0 WHERE cell_key = 't-tng' AND repeat_index = 1",
+     "x_timing_short_of_frames"),
     ("a cell with no rate-control mode among its settings", "DELETE FROM cell_setting WHERE cell_key = 's-p1' AND setting_id = 'qsv.q'",
      "x_cell_without_a_rate_mode"),
     ("a search scored at a height no served lane uses", "UPDATE search SET score_height = 1080 WHERE search_id = 'b580-qsv-av1'",
@@ -900,6 +902,8 @@ DDL_REFUSALS = [
     ("a scorer with an unknown backend", "INSERT INTO scorer VALUES ('eta-wsl', '[]', '[]', 'vmaf', 0, '/c')"),
     ("an equivalence whose exactness is not a bool", "INSERT INTO scorer_equivalence VALUES ('b580-qsv-av1-score', 'b580-qsv-av1-score', 'vmaf', 'mean', 1, 0.0, 2)"),
     ("an INADMISSIBLE verdict with no reason", "INSERT INTO admissibility_verdict VALUES (3, 'intel-b580-ihd26.2.2-qsv-av1', 'qsv.q', 'obeys_rate', 'tng', NULL, NULL, 'INADMISSIBLE', NULL)"),
+    ("a timing sample with no frame count",
+     "INSERT INTO timing (cell_key, workers, repeat_index, fps, wall_s, decode_path, is_warmup) VALUES ('t-tng', 1, 5, 600.0, 2.4, 'hardware', 0)"),
     ("an event by nobody", "INSERT INTO run_event (run_id, at, state) VALUES ('b580-qsv-av1', '2026-09-03T03:00', 'running')"),
 ]
 

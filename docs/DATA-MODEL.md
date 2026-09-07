@@ -548,7 +548,7 @@ flag, and `cell_setting` is what it became.
     score                  run_id · cell_key · height
                            · metric ∈ {ssimulacra2, butteraugli, vmaf, cambi, psnr_y, float_ssim}
                            · statistic ∈ {mean, p5, min, max} · value · recipe · scorer_build      ROW (score)
-    timing                 cell_key · workers · repeat_index · fps · wall_s
+    timing                 cell_key · workers · repeat_index · fps · wall_s · frames
                            · decode_path ∈ {hardware, software} · is_warmup · noise_floor_pct
                            · leg ∈ {full, decode, decode_filters}                                  ROW (time)
     step_trace             run_id · cell_key · height
@@ -1003,6 +1003,7 @@ erDiagram
         INTEGER repeat_index PK
         REAL fps
         REAL wall_s
+        INTEGER frames
         TEXT decode_path "hardware | software"
         INTEGER is_warmup
         REAL noise_floor_pct
@@ -1556,6 +1557,7 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 | `x_admissibility_without_cells` | an admissibility verdict with no encodes behind it -- a test that did not run is not evidence | the screen posts a verdict with the cells it summarises; re-run the test |
 | `x_verdict_without_cells` | a screen verdict with no encodes behind it -- a probe that did not run is not evidence | the screen posts a verdict with the cells it summarises; re-run the probe |
 | `x_encode_short_of_frames` | an encode with fewer frames than its cut -- a leg is verified by FRAME COUNT, never exit status | the encode did not run to the end; read its stderr, fix the cause and re-encode the cell |
+| `x_timing_short_of_frames` | a timing sample with fewer frames than its cut -- a leg is verified by FRAME COUNT, never exit status | the leg did not run to the end; read its stderr, fix the cause and re-time the cell |
 | `x_cell_without_a_rate_mode` | a cell whose identity settings carry no rate-control mode -- the mode is derived from what is set, never read off argv | plan the cell with its rate-control setting among the identity settings; a mode read off argv is not a setting |
 | `x_search_height_not_a_lane_height` | a search scored at a height that is not a served lane's panel height -- the height is a decision, never a default | author-search with score_height equal to a served lane's score_height |
 | `x_score_at_another_height` | a score at a height other than its search's -- rows carrying more than one height are refused | score at the search's height only; the height is decided once, in author-search |
@@ -1572,5 +1574,5 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 | `content_rate_meets_floor` (script) | content minutes per wall minute per (lane, host) at the shipped setting and worker count meets the lane's floor; a floor with no timing behind it is UNMEASURED, not unchanged | time the shipped setting on that (lane, host) at that worker count; a rate under the floor ships elsewhere, or the floor changes with set-floor |
 | `tags_complete` (script) | every table carries @group, @class and @writer; FILE means a person wrote it; one writer per table | tag the table in sweep/schema.sql with @group, @class and @writer |
 
-**Enforced by the DDL itself, so no view is needed:** a score row always names its height and its score run; a timing row always names its decode path and worker count · a score run names the run it scores, and no other stage has a parent · a shipped row's (lane, step) is one of the lane's steps · `measured` needs an evidence class; `policy` needs a reason; a `classified` cut check needs a reason · a derived constant carries its inputs and its precision; a policy constant carries its value and its reason; a measured one has no typed value · an incumbent arm is pinned at its anchor; the base and the candidates are not · a score target and its height are set together or not at all; a cap that binds names its constant · one ladder per codec; a reference cut names the chain that built it · an inventory or verify run names no unit; every other stage names one.
+**Enforced by the DDL itself, so no view is needed:** a score row always names its height and its score run; a timing row always names its decode path, worker count and frame count · a score run names the run it scores, and no other stage has a parent · a shipped row's (lane, step) is one of the lane's steps · `measured` needs an evidence class; `policy` needs a reason; a `classified` cut check needs a reason · a derived constant carries its inputs and its precision; a policy constant carries its value and its reason; a measured one has no typed value · an incumbent arm is pinned at its anchor; the base and the candidates are not · a score target and its height are set together or not at all; a cap that binds names its constant · one ladder per codec; a reference cut names the chain that built it · an inventory or verify run names no unit; every other stage names one.
 <!-- END GENERATED: checks -->

@@ -467,6 +467,7 @@ CREATE TABLE timing (                                       -- ONE-TO-MANY: work
   repeat_index    INTEGER NOT NULL,
   fps             REAL NOT NULL,
   wall_s          REAL NOT NULL,
+  frames          INTEGER NOT NULL,                                                -- the leg's output, counted; exit status is never the evidence
   decode_path     TEXT NOT NULL CHECK (decode_path IN ('hardware','software')),   -- MEASURED; speed partitions on it
   is_warmup       INTEGER NOT NULL CHECK (is_warmup IN (0,1)),                    -- flagged, never silently dropped
   noise_floor_pct REAL,
@@ -1110,6 +1111,15 @@ CREATE VIEW x_encode_short_of_frames AS
     JOIN content_class cc ON cc.content_class_id = r.content_class_id
     JOIN cut k ON k.reference_set_id = cc.reference_set_id AND k.window_id = c.window_id AND k.kind = c.cut_kind
    WHERE e.frames <> k.frames;
+
+-- @check a timing sample with fewer frames than its cut -- a leg is verified by FRAME COUNT, never exit status
+-- @fix the leg did not run to the end; read its stderr, fix the cause and re-time the cell
+CREATE VIEW x_timing_short_of_frames AS
+  SELECT t.cell_key, t.workers, t.repeat_index, t.leg, t.frames, k.frames AS cut_frames
+    FROM timing t JOIN cell c ON c.cell_key = t.cell_key JOIN run r ON r.run_id = c.run_id
+    JOIN content_class cc ON cc.content_class_id = r.content_class_id
+    JOIN cut k ON k.reference_set_id = cc.reference_set_id AND k.window_id = c.window_id AND k.kind = c.cut_kind
+   WHERE t.frames <> k.frames;
 
 -- @check a cell whose identity settings carry no rate-control mode -- the mode is derived from what is set, never read off argv
 -- @fix plan the cell with its rate-control setting among the identity settings; a mode read off argv is not a setting

@@ -103,7 +103,7 @@
      "today": ["sweep.py:5722", "sweep.py:5754"],
      "test": "A leg that produced zero frames is a failure even at rc=0.",
      "disposition": "check",
-     "how": "`x_encode_short_of_frames`"},
+     "how": "`x_encode_short_of_frames`; `x_timing_short_of_frames` for every leg of a timing sample, which carries its own `frames`"},
 
     {"id": "adm-guards-are-per-vendor-and-codec",
      "invariant": "A capability verdict is scoped to (vendor, codec). A measurement on one card must never be enforced on another.",
