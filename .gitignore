@@ -5,3 +5,6 @@ __pycache__/
 .venv/
 build/
 dist/
+
+# the schema is the source of the model; the operator's global ignore has *.sql
+!sweep/schema.sql

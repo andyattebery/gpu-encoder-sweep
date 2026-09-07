@@ -1,0 +1,1011 @@
+-- harness/schema.sql -- THE DATA MODEL, in the form SQLite can load.
+--
+-- This file is the source. DATA-MODEL.md keeps the argument (THE KEY, THE SAMPLE, the stage
+-- matrix, the rules, the absences); its schema blocks, diagrams, writers list and check list
+-- are RENDERED from this file by `python3 harness/model_check.py --render`, and `--check`
+-- fails when they are stale. Edit here, never in the rendered blocks.
+--
+-- Tags on every table, read by model_check.py:
+--   @group   reference | sample | measurement | decision     grouping for the doc and diagrams
+--   @class   FILE | ROW                                        a human authored it | a machine observed it
+--   @writer  <stage>                                           the ONE writer; FILE tables are `authored`
+-- Every table carries all three. A CREATE VIEW named x_* is a CHECK: it must return ZERO rows
+-- against a valid store, and the `-- @check` line above it is the one-line meaning rendered
+-- into the doc. Views named v_* are derived readings, not checks.
+--
+-- Conventions: STRICT tables (a value has one type). Enumerations are CHECK constraints so the
+-- doc can render them. Three different "step" vocabularies are deliberately three columns:
+-- run.stage (a process stage), step_trace.scoring_step, lane_step.step (a flow step).
+
+PRAGMA foreign_keys = ON;
+
+-- ============================================================================ REFERENCE
+
+-- @group reference
+-- @class FILE
+-- @writer authored
+CREATE TABLE host (
+  host        TEXT PRIMARY KEY,                           -- media-01 | htpc-01 | eta
+  ssh_host    TEXT NOT NULL,
+  os          TEXT NOT NULL CHECK (os IN ('linux','windows')),
+  work_root   TEXT NOT NULL,
+  ffmpeg      TEXT NOT NULL,                               -- the patched build's path on this host
+  notes       TEXT,
+  blocked     TEXT                                         -- NULL = usable; otherwise THE FIX, and a run on it is refused at the moment of use
+) STRICT;
+
+-- @group reference
+-- @class FILE
+-- @writer authored
+CREATE TABLE encoder_unit (                                 -- the measurement key's hardware half
+  encoder_unit_id TEXT PRIMARY KEY,
+  vendor      TEXT NOT NULL CHECK (vendor IN ('nvidia','amd','intel')),
+  card        TEXT NOT NULL,
+  driver      TEXT NOT NULL,                               -- a FACTOR: 25.2.3 -> 26.2.2 moved bytes 14/14
+  frontend    TEXT NOT NULL CHECK (frontend IN ('nvenc','vaapi','qsv')),
+  codec       TEXT NOT NULL CHECK (codec IN ('hevc','av1')),
+  UNIQUE (vendor, card, driver, frontend, codec)
+) STRICT;
+
+-- @group reference
+-- @class FILE
+-- @writer authored
+CREATE TABLE host_unit (                                    -- which units are in which box; routing reads it, the key does not
+  host            TEXT NOT NULL REFERENCES host,
+  encoder_unit_id TEXT NOT NULL REFERENCES encoder_unit,
+  device          TEXT NOT NULL CHECK (device NOT LIKE '%renderD%'),   -- by PCI slot or a stable id; never a render-node number, which inverted twice
+  PRIMARY KEY (host, encoder_unit_id)
+) STRICT;
+
+-- @group reference
+-- @class FILE
+-- @writer authored
+CREATE TABLE canonical_concept (                            -- one concept, several vendor spellings
+  canonical_id TEXT PRIMARY KEY,                            -- quality_anchor | rate_control_mode | preset ...
+  description  TEXT NOT NULL
+) STRICT;
+
+-- @group reference
+-- @class FILE
+-- @writer authored
+CREATE TABLE setting (
+  setting_id  TEXT PRIMARY KEY,                             -- e.g. qsv.b_strategy
+  flag        TEXT NOT NULL,                                -- the ffmpeg spelling: -b_strategy
+  frontend    TEXT CHECK (frontend IN ('nvenc','vaapi','qsv')),   -- NULL when is_generic
+  kind        TEXT NOT NULL CHECK (kind IN ('quality_anchor','mode_selector','ordinal','option')),
+  subsystem   TEXT NOT NULL CHECK (subsystem IN ('rate_control','frame_types','tiles','lookahead','plumbing','other')),
+  value_type  TEXT NOT NULL CHECK (value_type IN ('int','real','enum','bool','text')),
+  range_lo    REAL,
+  range_hi    REAL,
+  is_generic  INTEGER NOT NULL CHECK (is_generic IN (0,1)), -- a generic ffmpeg option, absent from every private dump
+  notes       TEXT,
+  CHECK ((frontend IS NULL) = (is_generic = 1))
+) STRICT;
+
+-- @group reference
+-- @class FILE
+-- @writer authored
+CREATE TABLE setting_enum_value (                           -- a cell_setting value must be one of these
+  setting_id  TEXT NOT NULL REFERENCES setting,
+  value       TEXT NOT NULL,
+  PRIMARY KEY (setting_id, value)
+) STRICT;
+
+-- @group reference
+-- @class FILE
+-- @writer authored
+CREATE TABLE setting_role (                                 -- ONE flag may carry TWO concepts: qsv -q:v selects CQP AND is the anchor
+  setting_id   TEXT NOT NULL REFERENCES setting,
+  canonical_id TEXT NOT NULL REFERENCES canonical_concept,
+  PRIMARY KEY (setting_id, canonical_id)
+) STRICT;
+
+-- @group reference
+-- @class FILE
+-- @writer authored
+CREATE TABLE setting_scope (
+  setting_id          TEXT NOT NULL REFERENCES setting,
+  encoder_unit_id     TEXT NOT NULL REFERENCES encoder_unit,
+  applies             INTEGER NOT NULL CHECK (applies IN (0,1)),
+  default_value       TEXT,
+  default_is_measured INTEGER NOT NULL CHECK (default_is_measured IN (0,1)),   -- absent is not "off"
+  PRIMARY KEY (setting_id, encoder_unit_id)
+) STRICT;
+
+-- @group reference
+-- @class FILE
+-- @writer authored
+CREATE TABLE constant (                                     -- the numbers the flow's per-title logic consumes; the harness produces them and runs none of that logic
+  name        TEXT PRIMARY KEY,                             -- CEILING | MARGIN | HEADROOM | BOUND | RUNG_FACTOR | HOST_THRESHOLD
+  value       REAL,                                        -- derived and policy: authored here. measured: in constant_value, from the calibrate stage
+  unit        TEXT NOT NULL,
+  provenance  TEXT NOT NULL CHECK (provenance IN ('measured','derived','policy')),   -- policy: a chosen value with its reason -- MARGIN, the skip threshold
+  inputs_json TEXT,                                         -- derived: the inputs, so the precision is honest
+  precision   TEXT,                                         -- e.g. ±~10%
+  reason      TEXT,                                         -- policy: why this value, and what bounds it
+  cites_json  TEXT,
+  CHECK (provenance <> 'derived' OR (inputs_json IS NOT NULL AND precision IS NOT NULL)),
+  CHECK (provenance <> 'policy' OR reason IS NOT NULL),
+  CHECK ((provenance IN ('derived','policy')) = (value IS NOT NULL))
+) STRICT;
+
+-- @group reference
+-- @class FILE
+-- @writer authored
+CREATE TABLE lane (                                         -- TDARR-TRANSCODE-PLAN.md ## Coverage, one row per lane
+  lane                 TEXT PRIMARY KEY,
+  codec                TEXT NOT NULL CHECK (codec IN ('hevc','av1')),
+  decision_rule        TEXT NOT NULL CHECK (decision_rule IN ('cap','incumbent','target')),  -- HOW the shipped value is decided; Stage 10 inverts on it
+  input_width_min      INTEGER,                             -- NULL = any; Coverage's "> 1920" is min 1921
+  input_width_max      INTEGER,                             -- NULL = any; Coverage's "<= 1920" is max 1920
+  input_dynamic_range  TEXT NOT NULL CHECK (input_dynamic_range IN ('sdr','hdr')),
+  output_resolution    TEXT NOT NULL,                       -- 1080p | native
+  output_dynamic_range TEXT NOT NULL CHECK (output_dynamic_range IN ('sdr','hdr')),
+  hdr_handling         TEXT NOT NULL CHECK (hdr_handling IN ('n/a','tonemapping','passthrough')),
+  audio                TEXT NOT NULL,
+  subtitles            TEXT NOT NULL,
+  score_target         REAL,                                -- only a target-bound lane has one
+  score_height         INTEGER NOT NULL,                    -- the device's 16:9 panel height; every lane scores somewhere
+  bitrate_cap_binds    TEXT NOT NULL CHECK (bitrate_cap_binds IN ('never','rarely','always')),
+  bitrate_cap_constant TEXT REFERENCES constant,            -- the CEILING, where a cap exists
+  has_content          INTEGER NOT NULL CHECK (has_content IN (0,1)),
+  min_content_rate     REAL,                                -- the deadline: content minutes per wall minute a host must reach; NULL = report only
+  CHECK ((decision_rule = 'target') = (score_target IS NOT NULL)),
+  CHECK (decision_rule <> 'cap' OR bitrate_cap_constant IS NOT NULL),
+  CHECK ((bitrate_cap_binds = 'never') = (bitrate_cap_constant IS NULL))
+) STRICT;
+
+-- @group reference
+-- @class FILE
+-- @writer authored
+CREATE TABLE lane_step (                                    -- the flow steps a lane has; a shipped row must name one
+  lane  TEXT NOT NULL REFERENCES lane,
+  step  TEXT NOT NULL CHECK (step IN ('probe','remux','quality-target-encode','bitrate-target-encode')),
+  PRIMARY KEY (lane, step)
+) STRICT;
+
+-- @group reference
+-- @class FILE
+-- @writer authored
+CREATE TABLE constant_scope (                               -- the lanes a constant admits; outside it is a refusal
+  name  TEXT NOT NULL REFERENCES constant,
+  lane  TEXT NOT NULL REFERENCES lane,
+  PRIMARY KEY (name, lane)
+) STRICT;
+
+-- @group reference
+-- @class FILE
+-- @writer authored
+CREATE TABLE ladder (                                       -- ONE ladder per codec, never per host
+  ladder_id TEXT PRIMARY KEY,
+  codec     TEXT NOT NULL UNIQUE CHECK (codec IN ('hevc','av1'))
+) STRICT;
+
+-- @group reference
+-- @class FILE
+-- @writer authored
+CREATE TABLE ladder_rung (                                  -- a shipped quality anchor must be one of these
+  ladder_id TEXT NOT NULL REFERENCES ladder,
+  rung      INTEGER NOT NULL,
+  PRIMARY KEY (ladder_id, rung)
+) STRICT;
+
+-- @group reference
+-- @class FILE
+-- @writer authored
+CREATE TABLE chain (                                        -- the production filter graph per (lane, host): AUTHORED before the sample -- the reference cut is built through it; Stage 7 times it; Stage 11 ships the same row
+  lane        TEXT NOT NULL REFERENCES lane,
+  host        TEXT NOT NULL REFERENCES host,
+  vf_template TEXT NOT NULL,
+  notes_ref   TEXT,
+  PRIMARY KEY (lane, host)
+) STRICT;
+
+-- ============================================================================ SAMPLE
+
+-- @group sample
+-- @class ROW
+-- @writer inventory
+CREATE TABLE title (                                        -- the POPULATION: one row per library file, from a scan
+  title_id        TEXT PRIMARY KEY,
+  path            TEXT NOT NULL UNIQUE,
+  library         TEXT NOT NULL,
+  width           INTEGER NOT NULL,
+  height          INTEGER NOT NULL,
+  dynamic_range   TEXT NOT NULL CHECK (dynamic_range IN ('sdr','hdr10','hlg','dv')),
+  dv_profile      INTEGER,
+  video_codec     TEXT NOT NULL,
+  field_order     TEXT NOT NULL,
+  fps             REAL NOT NULL,
+  bit_depth       INTEGER NOT NULL,
+  bitrate_kbps    REAL NOT NULL,
+  bpp             REAL NOT NULL,                            -- bits per pixel per frame, so resolutions compare
+  source_type     TEXT NOT NULL CHECK (source_type IN ('remux','bluray','web','other')),
+  audio_layout    TEXT,
+  subtitle_layout TEXT,
+  scanned_at      TEXT NOT NULL,
+  CHECK ((dynamic_range = 'dv') = (dv_profile IS NOT NULL))
+) STRICT;
+
+-- @group sample
+-- @class FILE
+-- @writer authored
+CREATE TABLE window (                                       -- a cut of a title: (title, ss, t) and nothing else
+  window_id       TEXT PRIMARY KEY,
+  title_id        TEXT NOT NULL REFERENCES title,
+  ss              REAL NOT NULL,
+  t               REAL NOT NULL,
+  character       TEXT,                                     -- what the window is FOR; judgement, written down
+  origin          TEXT NOT NULL CHECK (origin IN ('pinned','generated')),
+  selected_by     TEXT,                                     -- the selection policy and its parameters
+  selection_score REAL,
+  notes           TEXT
+) STRICT;
+
+-- @group sample
+-- @class ROW
+-- @writer materialise
+CREATE TABLE reference_set (                                -- one reference pixel set: one geometry, built once, on one host
+  reference_set_id TEXT PRIMARY KEY,
+  geometry    TEXT NOT NULL,                                -- 1920x1080
+  pix_fmt     TEXT NOT NULL,                                -- p010le
+  built_on    TEXT NOT NULL REFERENCES host,
+  built_with  TEXT NOT NULL,                                -- ffmpeg build and sha
+  built_at    TEXT NOT NULL
+) STRICT;
+
+-- @group sample
+-- @class FILE
+-- @writer authored
+CREATE TABLE content_class (                                -- a named, authored set of windows; the key's content half
+  content_class_id TEXT PRIMARY KEY,
+  name             TEXT NOT NULL UNIQUE,
+  reference_set_id TEXT NOT NULL REFERENCES reference_set,  -- bound to exactly ONE reference pixel set
+  description      TEXT
+) STRICT;
+
+-- @group sample
+-- @class FILE
+-- @writer authored
+CREATE TABLE content_class_lane (                           -- the lanes a class is sampled FOR
+  content_class_id TEXT NOT NULL REFERENCES content_class,
+  lane             TEXT NOT NULL REFERENCES lane,
+  PRIMARY KEY (content_class_id, lane)
+) STRICT;
+
+-- @group sample
+-- @class FILE
+-- @writer authored
+CREATE TABLE content_class_member (
+  content_class_id TEXT NOT NULL REFERENCES content_class,
+  window_id        TEXT NOT NULL REFERENCES window,
+  PRIMARY KEY (content_class_id, window_id)
+) STRICT;
+
+-- @group sample
+-- @class FILE
+-- @writer authored
+CREATE TABLE content_class_stratum (                        -- THE FRAME: how the class was picked
+  content_class_id TEXT NOT NULL REFERENCES content_class,
+  stratum          TEXT NOT NULL,
+  kind             TEXT NOT NULL CHECK (kind IN ('inventory','quantile','character')),
+  definition       TEXT NOT NULL,                           -- inventory/quantile: a SQL boolean over title t.*; character: a name
+  min_windows      INTEGER NOT NULL DEFAULT 1,
+  share_estimate   REAL,                                    -- character strata only: judgement, and says so
+  PRIMARY KEY (content_class_id, stratum),
+  CHECK ((kind = 'character') = (share_estimate IS NOT NULL))
+) STRICT;
+
+-- @group sample
+-- @class ROW
+-- @writer materialise
+CREATE TABLE cut (                                          -- one window's file in one reference set
+  cut_id           TEXT PRIMARY KEY,
+  reference_set_id TEXT NOT NULL REFERENCES reference_set,
+  window_id        TEXT NOT NULL REFERENCES window,
+  kind             TEXT NOT NULL CHECK (kind IN ('reference','source')),
+  chain_lane       TEXT,                                    -- reference cuts: the lane whose chain built it
+  chain_host       TEXT,
+  content_sha      TEXT NOT NULL,                           -- of decoded FRAMES, never the container
+  bytes            INTEGER NOT NULL,
+  frames           INTEGER NOT NULL,
+  tags_pinned      TEXT,
+  UNIQUE (reference_set_id, window_id, kind),
+  FOREIGN KEY (chain_lane, chain_host) REFERENCES chain (lane, host),
+  CHECK ((kind = 'reference') = (chain_lane IS NOT NULL))
+) STRICT;
+
+-- @group sample
+-- @class ROW
+-- @writer verify
+CREATE TABLE cut_check (                                    -- a content check, not a checksum
+  cut_id     TEXT NOT NULL REFERENCES cut,
+  check_name TEXT NOT NULL,
+  result     TEXT NOT NULL CHECK (result IN ('pass','fail','classified')),
+  reason     TEXT,
+  checked_at TEXT NOT NULL,
+  PRIMARY KEY (cut_id, check_name, checked_at),
+  CHECK (result <> 'classified' OR reason IS NOT NULL)     -- a classification needs a reason
+) STRICT;
+
+-- ============================================================================ MEASUREMENT
+
+-- @group measurement
+-- @class ROW
+-- @writer orchestrate
+CREATE TABLE run (                                          -- one invocation
+  run_id           TEXT PRIMARY KEY,
+  encoder_unit_id  TEXT NOT NULL REFERENCES encoder_unit,
+  content_class_id TEXT REFERENCES content_class,           -- NULL only for a library-title run (the pre-pass probe)
+  search_id        TEXT REFERENCES search,                  -- the spec this run executes; NULL for screen, viewing, probe, calibrate
+  host             TEXT NOT NULL REFERENCES host,           -- where it RAN; not part of the measurement key
+  node_label       TEXT NOT NULL,                           -- a distinct ledger identity per card in a multi-card box
+  stage            TEXT NOT NULL CHECK (stage IN ('screen','locate','encode','time','split','concurrency','viewing','probe','calibrate')),
+  ffmpeg_build     TEXT NOT NULL,
+  ffmpeg_sha       TEXT NOT NULL,
+  scorer_build     TEXT,
+  ffvship_version  TEXT,
+  metric_backend   TEXT,
+  harness_version  TEXT NOT NULL,
+  started_at       TEXT NOT NULL,
+  finished_at      TEXT,
+  state            TEXT NOT NULL DEFAULT 'planned' CHECK (state IN ('planned','launched','running','complete','failed','abandoned')),
+  fetched_at       TEXT,                                    -- when the product reached the store
+  verified_at      TEXT,                                    -- when count and heights were checked against the plan
+  CHECK (state <> 'complete' OR verified_at IS NOT NULL)
+) STRICT;
+
+-- @group measurement
+-- @class ROW
+-- @writer orchestrate
+CREATE TABLE run_event (                                    -- append-only transitions: the log the waiter reads, instead of a log file
+  run_id TEXT NOT NULL REFERENCES run,
+  at     TEXT NOT NULL,
+  state  TEXT NOT NULL CHECK (state IN ('planned','launched','running','complete','failed','abandoned')),
+  detail TEXT,                                              -- the launch command, the sha on both ends, the failure
+  PRIMARY KEY (run_id, at, state)
+) STRICT;
+
+-- @group measurement
+-- @class ROW
+-- @writer orchestrate
+CREATE TABLE run_window (                                   -- what the run actually COVERED
+  run_id    TEXT NOT NULL REFERENCES run,
+  window_id TEXT NOT NULL REFERENCES window,
+  PRIMARY KEY (run_id, window_id)
+) STRICT;
+
+-- @group measurement
+-- @class ROW
+-- @writer orchestrate
+CREATE TABLE cell (                                         -- one encode: the common core of every encoding stage
+  cell_key  TEXT PRIMARY KEY,                               -- content-addressed: settings, cut sha, tool versions
+  run_id    TEXT NOT NULL REFERENCES run,
+  window_id TEXT NOT NULL REFERENCES window,
+  cut_kind  TEXT NOT NULL CHECK (cut_kind IN ('reference','source','library'))
+) STRICT;
+
+-- @group measurement
+-- @class ROW
+-- @writer orchestrate
+CREATE TABLE cell_setting (                                 -- ONE-TO-MANY: the settings a cell was encoded with
+  cell_key   TEXT NOT NULL REFERENCES cell,
+  setting_id TEXT NOT NULL REFERENCES setting,
+  value      TEXT NOT NULL,
+  role       TEXT NOT NULL CHECK (role IN ('identity','computed','default_resolved')),
+  PRIMARY KEY (cell_key, setting_id)
+) STRICT;
+
+-- @group measurement
+-- @class ROW
+-- @writer encode core
+CREATE TABLE encode (
+  cell_key     TEXT PRIMARY KEY REFERENCES cell,
+  bytes        INTEGER NOT NULL,
+  bitrate_kbps REAL NOT NULL,
+  frames       INTEGER NOT NULL,
+  duration_s   REAL NOT NULL,
+  decode_path  TEXT NOT NULL CHECK (decode_path IN ('hardware','software')),
+  kept         INTEGER NOT NULL CHECK (kept IN (0,1))      -- most stages discard; gone and never-made must differ
+) STRICT;
+
+-- @group measurement
+-- @class ROW
+-- @writer encode core
+CREATE TABLE cell_failure (                                 -- a planned cell that did not encode: STDERR, never the exit status alone
+  cell_key TEXT PRIMARY KEY REFERENCES cell,
+  at       TEXT NOT NULL,
+  stderr   TEXT NOT NULL,
+  rc       INTEGER                                          -- recorded, never trusted
+) STRICT;
+
+-- @group measurement
+-- @class ROW
+-- @writer score
+CREATE TABLE score (                                        -- ONE-TO-MANY: height x metric x statistic
+  cell_key  TEXT NOT NULL REFERENCES cell,
+  height    INTEGER NOT NULL,                               -- a score without its height is not a number
+  metric    TEXT NOT NULL CHECK (metric IN ('ssimulacra2','butteraugli','vmaf','cambi','psnr_y','float_ssim')),
+  statistic TEXT NOT NULL CHECK (statistic IN ('mean','p5','min','max')),
+  value     REAL NOT NULL,
+  recipe    TEXT NOT NULL,                                 -- the named scoring recipe (FILL-A-CELL, S1): scaler, options, pooling
+  scorer_build TEXT NOT NULL,                              -- the binaries: FFVship version and the ffmpeg build sha
+  PRIMARY KEY (cell_key, height, metric, statistic, recipe, scorer_build)
+) STRICT;
+
+-- @group measurement
+-- @class ROW
+-- @writer time
+CREATE TABLE timing (                                       -- ONE-TO-MANY: workers x repeat; samples kept
+  cell_key        TEXT NOT NULL REFERENCES cell,
+  workers         INTEGER NOT NULL,
+  repeat_index    INTEGER NOT NULL,
+  fps             REAL NOT NULL,
+  wall_s          REAL NOT NULL,
+  decode_path     TEXT NOT NULL CHECK (decode_path IN ('hardware','software')),   -- MEASURED; speed partitions on it
+  is_warmup       INTEGER NOT NULL CHECK (is_warmup IN (0,1)),                    -- flagged, never silently dropped
+  noise_floor_pct REAL,
+  leg             TEXT NOT NULL DEFAULT 'full' CHECK (leg IN ('full','decode','decode_filters')),  -- the split: a truncated chain
+  PRIMARY KEY (cell_key, workers, repeat_index, leg)
+) STRICT;
+
+-- @group measurement
+-- @class ROW
+-- @writer score
+CREATE TABLE step_trace (
+  cell_key     TEXT NOT NULL REFERENCES cell,
+  height       INTEGER NOT NULL,
+  scoring_step TEXT NOT NULL CHECK (scoring_step IN ('rescale_ref','rescale_enc','ssimu2','butteraugli','libvmaf')),
+  seconds      REAL NOT NULL,
+  cores_busy   REAL,
+  gpu_mean     REAL,
+  gpu_max      REAL,
+  PRIMARY KEY (cell_key, height, scoring_step)
+) STRICT;
+
+-- @group measurement
+-- @class ROW
+-- @writer screen
+CREATE TABLE setting_verdict (                              -- PER WINDOW; the unit-level reading is v_setting_unit_reading
+  verdict_id      INTEGER PRIMARY KEY,
+  encoder_unit_id TEXT NOT NULL REFERENCES encoder_unit,
+  setting_id      TEXT NOT NULL REFERENCES setting,
+  window_id       TEXT NOT NULL REFERENCES window,
+  verdict         TEXT NOT NULL CHECK (verdict IN ('HONOURED','INERT','PARTIAL','REJECTED','BASE_FAILED','EXCLUDED')),
+  magnitude_pct   REAL,
+  base_setting_id TEXT REFERENCES setting,                  -- the prerequisite it was taken under
+  base_value      TEXT,
+  noise_floor_pct REAL,
+  reason          TEXT,                                     -- EXCLUDED needs one
+  UNIQUE (encoder_unit_id, setting_id, window_id, base_setting_id, base_value),
+  CHECK (verdict <> 'EXCLUDED' OR reason IS NOT NULL)
+) STRICT;
+
+-- @group measurement
+-- @class ROW
+-- @writer screen
+CREATE TABLE setting_verdict_cell (                         -- the encodes a verdict summarises; 5 repeats for the floor
+  verdict_id INTEGER NOT NULL REFERENCES setting_verdict,
+  cell_key   TEXT NOT NULL REFERENCES cell,
+  PRIMARY KEY (verdict_id, cell_key)
+) STRICT;
+
+
+-- @group measurement
+-- @class FILE
+-- @writer authored
+CREATE TABLE search (                                       -- the spec: what a search measures, on what, at what height
+  search_id         TEXT PRIMARY KEY,
+  content_class_id  TEXT NOT NULL REFERENCES content_class,
+  encoder_unit_id   TEXT NOT NULL REFERENCES encoder_unit,
+  anchor_setting_id TEXT NOT NULL REFERENCES setting,       -- the quality anchor every ladder is placed on
+  score_height      INTEGER NOT NULL,                       -- decided HERE, before anything is scored
+  notes             TEXT,
+  shipping_arm_id   TEXT REFERENCES arm                     -- the arm that ships: the base, unless a candidate beat it on efficiency and met the deadline
+) STRICT;
+
+-- @group measurement
+-- @class FILE
+-- @writer authored
+CREATE TABLE arm (                                          -- a candidate: one set of identity settings
+  arm_id    TEXT PRIMARY KEY,
+  search_id TEXT NOT NULL REFERENCES search,
+  name      TEXT NOT NULL,
+  role      TEXT NOT NULL CHECK (role IN ('base','candidate','incumbent')),   -- exactly one base (the mandatory path); candidates only when the screen earned a search; one incumbent where the rule needs it
+  accepted_by_viewing INTEGER REFERENCES viewing_verdict,   -- an incumbent arm names the acceptance viewing that says it is acceptable
+  anchor_value TEXT,                                        -- the incumbent is PINNED at the anchor it ships and its cell may be the base arm's; the base and the candidates sweep the anchor
+  UNIQUE (search_id, name),
+  CHECK ((role = 'incumbent') = (anchor_value IS NOT NULL))
+) STRICT;
+
+-- @group measurement
+-- @class FILE
+-- @writer authored
+CREATE TABLE search_coarse_rung (                           -- the ONE shared ladder the locate pass encodes
+  search_id TEXT NOT NULL REFERENCES search,
+  rung      INTEGER NOT NULL,
+  PRIMARY KEY (search_id, rung)
+) STRICT;
+
+-- @group measurement
+-- @class FILE
+-- @writer authored
+CREATE TABLE arm_setting (                                  -- the same shape as cell_setting: a cell belongs to the arm it equals
+  arm_id     TEXT NOT NULL REFERENCES arm,
+  setting_id TEXT NOT NULL REFERENCES setting,
+  value      TEXT NOT NULL,
+  PRIMARY KEY (arm_id, setting_id)
+) STRICT;
+
+-- @group measurement
+-- @class FILE
+-- @writer authored
+CREATE TABLE search_target (                                -- the fixed points the column is read at
+  search_id TEXT NOT NULL REFERENCES search,
+  metric    TEXT NOT NULL CHECK (metric IN ('ssimulacra2','butteraugli','vmaf','cambi','psnr_y','float_ssim')),
+  statistic TEXT NOT NULL CHECK (statistic IN ('mean','p5','min','max')),
+  target    REAL NOT NULL,
+  viewing_id INTEGER REFERENCES viewing_verdict,           -- a target-bound lane's target names the acceptance viewing it came from
+  PRIMARY KEY (search_id, metric, statistic, target)
+) STRICT;
+
+-- @group measurement
+-- @class ROW
+-- @writer derive ladders
+CREATE TABLE arm_ladder_rung (                              -- one ladder per (arm, window), placed from the LOCATE run it names
+  run_id    TEXT NOT NULL REFERENCES run,                    -- the locate run; never written into the spec
+  arm_id    TEXT NOT NULL REFERENCES arm,
+  window_id TEXT NOT NULL REFERENCES window,
+  rung      INTEGER NOT NULL,
+  PRIMARY KEY (run_id, arm_id, window_id, rung)
+) STRICT;
+
+-- @group measurement
+-- @class ROW
+-- @writer calibrate
+CREATE TABLE constant_value (                               -- a measured constant's value, from the run it was computed on
+  name        TEXT NOT NULL REFERENCES constant,
+  run_id      TEXT NOT NULL REFERENCES run,
+  value       REAL NOT NULL,
+  computed_at TEXT NOT NULL,
+  PRIMARY KEY (name, run_id)
+) STRICT;
+
+-- ============================================================================ DECISION
+
+-- @group decision
+-- @class FILE
+-- @writer ship
+CREATE TABLE shipped (                                      -- ONE value per (lane, host, step); may override a measurement
+  shipped_id       INTEGER PRIMARY KEY,
+  lane             TEXT NOT NULL REFERENCES lane,
+  host             TEXT NOT NULL REFERENCES host,
+  step             TEXT NOT NULL,
+  encoder_unit_id  TEXT REFERENCES encoder_unit,            -- NULL for remux
+  provenance       TEXT NOT NULL CHECK (provenance IN ('measured','derived','no-content','fixed')),   -- fixed: a remux, no encoder decision
+  decided_by       TEXT NOT NULL CHECK (decided_by IN ('measurement','policy')),
+  reason           TEXT,
+  content_class_id TEXT REFERENCES content_class,           -- the class the value was MEASURED on
+  workers          INTEGER,
+  evidence_query   TEXT,                                    -- executable, not a filename
+  cites_json       TEXT,
+  UNIQUE (lane, host, step),
+  FOREIGN KEY (lane, step) REFERENCES lane_step (lane, step),
+  CHECK (provenance <> 'measured' OR content_class_id IS NOT NULL),
+  CHECK (decided_by <> 'policy' OR reason IS NOT NULL),
+  CHECK ((step = 'remux') = (provenance = 'fixed'))
+) STRICT;
+
+-- @group decision
+-- @class FILE
+-- @writer ship
+CREATE TABLE shipped_setting (                              -- the same shape as cell_setting, so "did we measure this?" is a set comparison
+  shipped_id    INTEGER NOT NULL REFERENCES shipped,
+  setting_id    TEXT NOT NULL REFERENCES setting,
+  value         TEXT NOT NULL,
+  role          TEXT NOT NULL CHECK (role IN ('identity','computed','default_resolved')),
+  from_constant TEXT REFERENCES constant,                   -- a computed value names the constant it came from
+  PRIMARY KEY (shipped_id, setting_id),
+  CHECK (role = 'computed' OR from_constant IS NULL)
+) STRICT;
+
+
+-- @group decision
+-- @class FILE
+-- @writer ship
+CREATE TABLE routing_exclusion (                            -- a host a lane is deliberately NOT routed to, with the reason
+  lane   TEXT NOT NULL REFERENCES lane,
+  host   TEXT NOT NULL REFERENCES host,
+  reason TEXT NOT NULL,
+  PRIMARY KEY (lane, host)
+) STRICT;
+
+-- @group decision
+-- @class FILE
+-- @writer viewing
+CREATE TABLE viewing_verdict (                              -- a person's verdict on the device: the one measurement whose instrument is eyes
+  viewing_id INTEGER PRIMARY KEY,
+  kind      TEXT NOT NULL CHECK (kind IN ('pair','acceptance')),   -- a against b, or: is a acceptable for this lane
+  lane      TEXT REFERENCES lane,                           -- acceptance: the use the judgement is for (the kids watch in daylight)
+  window_id TEXT NOT NULL REFERENCES window,
+  cell_a    TEXT NOT NULL REFERENCES cell,
+  cell_b    TEXT REFERENCES cell,                           -- pair only
+  device    TEXT NOT NULL,
+  viewer    TEXT NOT NULL,
+  verdict   TEXT NOT NULL CHECK (verdict IN ('a','b','same','unsure','acceptable','not_acceptable')),
+  notes     TEXT,
+  viewed_at TEXT NOT NULL,
+  CHECK ((kind = 'pair') = (cell_b IS NOT NULL)),
+  CHECK ((kind = 'acceptance') = (lane IS NOT NULL)),
+  CHECK ((kind = 'pair' AND verdict IN ('a','b','same','unsure'))
+      OR (kind = 'acceptance' AND verdict IN ('acceptable','not_acceptable','unsure')))
+) STRICT;
+
+-- ============================================================================ DERIVED READINGS (v_*)
+
+-- a lane's population: every title its predicates admit. Flow membership (which titles a
+-- flow carries) is the user's routing and narrows this; the view is the upper bound.
+CREATE VIEW v_lane_population AS
+  SELECT l.lane, t.title_id
+    FROM lane l JOIN title t
+      ON (l.input_width_min IS NULL OR t.width >= l.input_width_min)
+     AND (l.input_width_max IS NULL OR t.width <= l.input_width_max)
+     AND ((l.input_dynamic_range = 'sdr' AND t.dynamic_range = 'sdr')
+       OR (l.input_dynamic_range = 'hdr' AND t.dynamic_range <> 'sdr'));
+
+-- how many members of a class have a title in each served lane's population: "the row says how many"
+CREATE VIEW v_class_lane_representation AS
+  SELECT cl.content_class_id, cl.lane,
+         (SELECT count(*) FROM content_class_member m WHERE m.content_class_id = cl.content_class_id) AS members,
+         (SELECT count(*) FROM content_class_member m JOIN window w ON w.window_id = m.window_id
+            JOIN v_lane_population p ON p.title_id = w.title_id AND p.lane = cl.lane
+           WHERE m.content_class_id = cl.content_class_id) AS represented
+    FROM content_class_lane cl;
+
+-- the unit-level screen reading, DERIVED from per-window verdicts over the class:
+-- HONOURED if any member moved; INERT only if every member was screened and none moved.
+CREATE VIEW v_setting_unit_reading AS
+  SELECT v.encoder_unit_id, v.setting_id, m.content_class_id,
+         (SELECT count(*) FROM content_class_member mm WHERE mm.content_class_id = m.content_class_id) AS members,
+         count(DISTINCT v.window_id) AS screened,
+         sum(v.verdict = 'HONOURED') AS honoured_n,
+         sum(v.verdict = 'INERT') AS inert_n,
+         CASE WHEN sum(v.verdict = 'HONOURED') > 0 THEN 'HONOURED'
+              WHEN count(DISTINCT v.window_id) =
+                   (SELECT count(*) FROM content_class_member mm WHERE mm.content_class_id = m.content_class_id)
+                   AND sum(v.verdict = 'INERT') = count(v.verdict) THEN 'INERT'
+              ELSE 'INCOMPLETE ' || count(DISTINCT v.window_id) || ' of ' ||
+                   (SELECT count(*) FROM content_class_member mm WHERE mm.content_class_id = m.content_class_id)
+         END AS reading
+    FROM setting_verdict v
+    JOIN content_class_member m ON m.window_id = v.window_id
+   GROUP BY v.encoder_unit_id, v.setting_id, m.content_class_id;
+
+-- a constant's current value: authored for derived and policy, the latest calibrated one for measured
+CREATE VIEW v_constant_current AS
+  SELECT c.name, c.unit, c.provenance,
+         CASE WHEN c.provenance IN ('derived','policy') THEN c.value
+              ELSE (SELECT v.value FROM constant_value v WHERE v.name = c.name ORDER BY v.computed_at DESC LIMIT 1)
+         END AS value
+    FROM constant c;
+
+-- a cell's state, DERIVED from its rows: never stored, so it cannot disagree with them
+CREATE VIEW v_cell_state AS
+  SELECT c.cell_key, c.run_id,
+         CASE WHEN EXISTS (SELECT 1 FROM cell_failure f WHERE f.cell_key = c.cell_key) THEN 'failed'
+              WHEN EXISTS (SELECT 1 FROM score s WHERE s.cell_key = c.cell_key) THEN 'scored'
+              WHEN EXISTS (SELECT 1 FROM timing ti WHERE ti.cell_key = c.cell_key) THEN 'timed'
+              WHEN EXISTS (SELECT 1 FROM encode e WHERE e.cell_key = c.cell_key) THEN 'encoded'
+              ELSE 'planned' END AS state
+    FROM cell c;
+
+-- a run's progress: the plan is its cells, so the expected count is never typed
+CREATE VIEW v_run_progress AS
+  SELECT r.run_id, r.stage, r.state,
+         count(cs.cell_key) AS planned_total,
+         sum(cs.state = 'planned') AS still_planned,
+         sum(cs.state = 'encoded') AS encoded,
+         sum(cs.state = 'scored') AS scored,
+         sum(cs.state = 'timed') AS timed,
+         sum(cs.state = 'failed') AS failed
+    FROM run r LEFT JOIN v_cell_state cs ON cs.run_id = r.run_id
+   GROUP BY r.run_id;
+
+-- ============================================================================ CHECKS (x_*): each must return ZERO rows
+
+-- @check a lane marked has_content whose population is EMPTY (the other direction is judgement: flow membership narrows)
+CREATE VIEW x_has_content_but_empty AS
+  SELECT l.lane FROM lane l
+   WHERE l.has_content = 1
+     AND NOT EXISTS (SELECT 1 FROM v_lane_population p WHERE p.lane = l.lane);
+
+-- @check a shipped quality anchor that is not a rung on its lane's codec's ladder
+CREATE VIEW x_shipped_not_a_rung AS
+  SELECT s.shipped_id, s.lane, ss.setting_id, ss.value
+    FROM shipped s
+    JOIN shipped_setting ss ON ss.shipped_id = s.shipped_id
+    JOIN setting st ON st.setting_id = ss.setting_id AND st.kind = 'quality_anchor'
+    JOIN encoder_unit u ON u.encoder_unit_id = s.encoder_unit_id
+    JOIN ladder ld ON ld.codec = u.codec
+   WHERE NOT EXISTS (SELECT 1 FROM ladder_rung r
+                      WHERE r.ladder_id = ld.ladder_id AND r.rung = CAST(ss.value AS INTEGER));
+
+-- @check a `measured` value whose evidence class has NO member in the lane's population
+CREATE VIEW x_measured_without_representation AS
+  SELECT s.shipped_id, s.lane, s.content_class_id
+    FROM shipped s
+   WHERE s.provenance = 'measured'
+     AND NOT EXISTS (SELECT 1 FROM content_class_member m
+                       JOIN window w ON w.window_id = m.window_id
+                       JOIN v_lane_population p ON p.title_id = w.title_id AND p.lane = s.lane
+                      WHERE m.content_class_id = s.content_class_id);
+
+-- @check a `measured` value whose evidence class is not sampled for that lane
+CREATE VIEW x_measured_on_a_class_not_for_the_lane AS
+  SELECT s.shipped_id, s.lane, s.content_class_id
+    FROM shipped s
+   WHERE s.provenance = 'measured'
+     AND NOT EXISTS (SELECT 1 FROM content_class_lane cl
+                      WHERE cl.content_class_id = s.content_class_id AND cl.lane = s.lane);
+
+-- @check a constant applied outside its scope
+CREATE VIEW x_constant_outside_scope AS
+  SELECT s.shipped_id, s.lane, ss.from_constant
+    FROM shipped s JOIN shipped_setting ss ON ss.shipped_id = s.shipped_id
+   WHERE ss.from_constant IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM constant_scope c WHERE c.name = ss.from_constant AND c.lane = s.lane);
+
+-- @check a run that covered a window outside its declared class
+CREATE VIEW x_run_outside_class AS
+  SELECT rw.run_id, rw.window_id
+    FROM run_window rw JOIN run r ON r.run_id = rw.run_id
+   WHERE r.content_class_id IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM content_class_member m
+                      WHERE m.content_class_id = r.content_class_id AND m.window_id = rw.window_id);
+
+-- @check a cell on a window its run never declared covering
+CREATE VIEW x_cell_outside_run_coverage AS
+  SELECT c.cell_key, c.run_id, c.window_id
+    FROM cell c
+   WHERE NOT EXISTS (SELECT 1 FROM run_window rw WHERE rw.run_id = c.run_id AND rw.window_id = c.window_id);
+
+-- @check a cell_setting value outside the setting's enumeration
+CREATE VIEW x_setting_value_outside_enum AS
+  SELECT cs.cell_key, cs.setting_id, cs.value
+    FROM cell_setting cs JOIN setting s ON s.setting_id = cs.setting_id AND s.value_type = 'enum'
+   WHERE NOT EXISTS (SELECT 1 FROM setting_enum_value e WHERE e.setting_id = cs.setting_id AND e.value = cs.value);
+
+-- @check a reference cut built with the chain of a lane its class does not serve
+CREATE VIEW x_cut_chain_not_a_served_lane AS
+  SELECT c.cut_id, c.chain_lane
+    FROM cut c JOIN content_class cc ON cc.reference_set_id = c.reference_set_id
+   WHERE c.kind = 'reference'
+     AND NOT EXISTS (SELECT 1 FROM content_class_lane cl
+                      WHERE cl.content_class_id = cc.content_class_id AND cl.lane = c.chain_lane);
+
+-- @check a class member with no reference cut in the class's reference set
+CREATE VIEW x_member_without_reference_cut AS
+  SELECT m.content_class_id, m.window_id
+    FROM content_class_member m JOIN content_class cc ON cc.content_class_id = m.content_class_id
+   WHERE NOT EXISTS (SELECT 1 FROM cut c
+                      WHERE c.reference_set_id = cc.reference_set_id AND c.window_id = m.window_id AND c.kind = 'reference');
+
+-- @check a class that serves no lane
+CREATE VIEW x_class_serves_no_lane AS
+  SELECT cc.content_class_id FROM content_class cc
+   WHERE NOT EXISTS (SELECT 1 FROM content_class_lane cl WHERE cl.content_class_id = cc.content_class_id);
+
+-- @check a shipped encode step on a host with no chain for that lane -- the build order could not emit a command
+CREATE VIEW x_shipped_without_chain AS
+  SELECT s.shipped_id, s.lane, s.host FROM shipped s
+   WHERE s.step IN ('quality-target-encode','bitrate-target-encode')
+     AND NOT EXISTS (SELECT 1 FROM chain c WHERE c.lane = s.lane AND c.host = s.host);
+
+-- @check a screen verdict taken under a base the unit is not MEASURED to honour on that window
+CREATE VIEW x_verdict_on_unmeasured_base AS
+  SELECT v.verdict_id, v.setting_id, v.base_setting_id FROM setting_verdict v
+   WHERE v.base_setting_id IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM setting_verdict b
+                      WHERE b.encoder_unit_id = v.encoder_unit_id AND b.setting_id = v.base_setting_id
+                        AND b.window_id = v.window_id AND b.verdict = 'HONOURED');
+
+-- @check an arm using a setting the unit is not MEASURED to honour on any member of the class
+CREATE VIEW x_arm_setting_not_honoured AS
+  SELECT a.arm_id, ast.setting_id
+    FROM arm_setting ast JOIN arm a ON a.arm_id = ast.arm_id JOIN search s ON s.search_id = a.search_id
+   WHERE NOT EXISTS (SELECT 1 FROM setting_verdict v
+                       JOIN content_class_member m ON m.window_id = v.window_id AND m.content_class_id = s.content_class_id
+                      WHERE v.encoder_unit_id = s.encoder_unit_id AND v.setting_id = ast.setting_id AND v.verdict = 'HONOURED');
+
+-- @check a derived ladder whose run is not a LOCATE run of the same search
+CREATE VIEW x_ladder_from_a_non_locate_run AS
+  SELECT l.run_id, l.arm_id FROM arm_ladder_rung l JOIN run r ON r.run_id = l.run_id JOIN arm a ON a.arm_id = l.arm_id
+   WHERE r.stage <> 'locate' OR r.search_id IS NOT a.search_id
+   GROUP BY l.run_id, l.arm_id;
+
+-- @check an (arm, window) ladder with fewer than four rungs -- bd_rate's floor
+CREATE VIEW x_ladder_below_floor AS
+  SELECT run_id, arm_id, window_id, count(*) AS rungs FROM arm_ladder_rung
+   GROUP BY run_id, arm_id, window_id HAVING count(*) < 4;
+
+-- @check a viewing verdict on an encode that was discarded, either of a pair or an acceptance's one -- scoring deletes; the viewing re-encodes and keeps
+CREATE VIEW x_viewing_on_a_discarded_encode AS
+  SELECT g.viewing_id FROM viewing_verdict g
+   WHERE NOT EXISTS (SELECT 1 FROM encode e WHERE e.cell_key = g.cell_a AND e.kept = 1)
+      OR (g.cell_b IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM encode e WHERE e.cell_key = g.cell_b AND e.kept = 1));
+
+-- @check a search without exactly one base arm
+CREATE VIEW x_search_arm_roles AS
+  SELECT s.search_id, coalesce(sum(a.role = 'base'), 0) AS base_arms
+    FROM search s LEFT JOIN arm a ON a.search_id = s.search_id
+   GROUP BY s.search_id
+  HAVING coalesce(sum(a.role = 'base'), 0) <> 1;
+
+-- @check a shipping arm that belongs to another search
+CREATE VIEW x_shipping_arm_not_in_search AS
+  SELECT s.search_id, s.shipping_arm_id FROM search s JOIN arm a ON a.arm_id = s.shipping_arm_id
+   WHERE a.search_id <> s.search_id;
+
+-- @check a locate cell whose anchor value is not on the search's coarse ladder
+CREATE VIEW x_locate_cell_off_the_coarse_ladder AS
+  SELECT c.cell_key, cs.value
+    FROM cell c JOIN run r ON r.run_id = c.run_id AND r.stage = 'locate'
+    JOIN search s ON s.search_id = r.search_id
+    JOIN cell_setting cs ON cs.cell_key = c.cell_key AND cs.setting_id = s.anchor_setting_id
+   WHERE NOT EXISTS (SELECT 1 FROM search_coarse_rung k
+                      WHERE k.search_id = s.search_id AND k.rung = CAST(cs.value AS INTEGER));
+
+-- @check a search serving an incumbent-bound lane without exactly one incumbent arm
+CREATE VIEW x_incumbent_rule_without_incumbent_arm AS
+  SELECT s.search_id, cl.lane FROM search s
+    JOIN content_class_lane cl ON cl.content_class_id = s.content_class_id
+    JOIN lane l ON l.lane = cl.lane AND l.decision_rule = 'incumbent'
+   WHERE (SELECT count(*) FROM arm a WHERE a.search_id = s.search_id AND a.role = 'incumbent') <> 1;
+
+-- @check a search serving a target-bound lane with no target
+CREATE VIEW x_target_rule_without_targets AS
+  SELECT s.search_id, cl.lane FROM search s
+    JOIN content_class_lane cl ON cl.content_class_id = s.content_class_id
+    JOIN lane l ON l.lane = cl.lane AND l.decision_rule = 'target'
+   WHERE NOT EXISTS (SELECT 1 FROM search_target t WHERE t.search_id = s.search_id);
+
+-- @check a measured constant that was never calibrated -- its value would be a typed number
+CREATE VIEW x_measured_constant_never_calibrated AS
+  SELECT c.name FROM constant c
+   WHERE c.provenance = 'measured'
+     AND NOT EXISTS (SELECT 1 FROM constant_value v WHERE v.name = c.name);
+
+-- @check a target-bound lane's target that does not come from an acceptance viewing for that lane
+CREATE VIEW x_target_without_a_viewing AS
+  SELECT st.search_id, st.target, cl.lane
+    FROM search_target st
+    JOIN search s ON s.search_id = st.search_id
+    JOIN content_class_lane cl ON cl.content_class_id = s.content_class_id
+    JOIN lane l ON l.lane = cl.lane AND l.decision_rule = 'target'
+   WHERE NOT EXISTS (SELECT 1 FROM viewing_verdict v
+                      WHERE v.viewing_id = st.viewing_id AND v.kind = 'acceptance' AND v.lane = cl.lane);
+
+-- @check an incumbent arm that no acceptance viewing, for a lane the search serves, found acceptable
+CREATE VIEW x_incumbent_arm_not_viewed AS
+  SELECT a.arm_id, a.search_id
+    FROM arm a JOIN search s ON s.search_id = a.search_id
+   WHERE a.role = 'incumbent'
+     AND NOT EXISTS (SELECT 1 FROM viewing_verdict v
+                       JOIN content_class_lane cl ON cl.lane = v.lane AND cl.content_class_id = s.content_class_id
+                      WHERE v.viewing_id = a.accepted_by_viewing AND v.kind = 'acceptance' AND v.verdict = 'acceptable');
+
+-- @check a shipped row naming a unit that is not in that host
+CREATE VIEW x_shipped_unit_not_on_host AS
+  SELECT s.shipped_id, s.host, s.encoder_unit_id FROM shipped s
+   WHERE s.encoder_unit_id IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM host_unit hu WHERE hu.host = s.host AND hu.encoder_unit_id = s.encoder_unit_id);
+
+-- @check a lane with content that a unit on a host supports, with a step that has neither a shipped row nor an exclusion with a reason
+CREATE VIEW x_supported_lane_not_routed AS
+  SELECT DISTINCT l.lane, hu.host, ls.step
+    FROM lane l
+    JOIN lane_step ls ON ls.lane = l.lane
+    JOIN encoder_unit u ON u.codec = l.codec
+    JOIN host_unit hu ON hu.encoder_unit_id = u.encoder_unit_id
+   WHERE l.has_content = 1
+     AND NOT EXISTS (SELECT 1 FROM shipped s WHERE s.lane = l.lane AND s.host = hu.host AND s.step = ls.step)
+     AND NOT EXISTS (SELECT 1 FROM routing_exclusion x WHERE x.lane = l.lane AND x.host = hu.host);
+
+-- @check a lane routed to a host and excluded from it at once
+CREATE VIEW x_routed_and_excluded AS
+  SELECT x.lane, x.host FROM routing_exclusion x
+   WHERE EXISTS (SELECT 1 FROM shipped s WHERE s.lane = x.lane AND s.host = x.host);
+
+-- @check a run marked complete with a cell still planned -- a completed measurement that never came home
+CREATE VIEW x_complete_run_with_planned_cells AS
+  SELECT r.run_id, count(*) AS still_planned FROM run r JOIN v_cell_state cs ON cs.run_id = r.run_id
+   WHERE r.state = 'complete' AND cs.state = 'planned'
+   GROUP BY r.run_id;
+
+-- @check a run whose stored state is not its latest event -- the column and its log disagree
+CREATE VIEW x_run_state_disagrees_with_events AS
+  SELECT r.run_id, r.state, e.state AS latest_event FROM run r
+    JOIN run_event e ON e.run_id = r.run_id
+   WHERE e.at = (SELECT max(at) FROM run_event e2 WHERE e2.run_id = r.run_id)
+     AND e.state <> r.state
+  UNION ALL
+  SELECT r.run_id, r.state, NULL FROM run r
+   WHERE r.state <> 'planned' AND NOT EXISTS (SELECT 1 FROM run_event e WHERE e.run_id = r.run_id);
+
+-- @check two active runs on one host -- the box is not quiet, and pushing under a live run corrupts it
+CREATE VIEW x_two_active_runs_on_a_host AS
+  SELECT host, count(*) AS active FROM run WHERE state IN ('launched','running')
+   GROUP BY host HAVING count(*) > 1;
+
+-- @check a run on a host that is blocked -- refused at the moment of use, with the fix
+CREATE VIEW x_run_on_a_blocked_host AS
+  SELECT r.run_id, h.host, h.blocked FROM run r JOIN host h ON h.host = r.host
+   WHERE h.blocked IS NOT NULL AND r.state <> 'abandoned';
+
+-- @check a run whose unit is not in the host it ran on
+CREATE VIEW x_run_unit_not_on_host AS
+  SELECT r.run_id, r.host, r.encoder_unit_id FROM run r
+   WHERE NOT EXISTS (SELECT 1 FROM host_unit hu WHERE hu.host = r.host AND hu.encoder_unit_id = r.encoder_unit_id);
+
+-- @check a screen verdict with no encodes behind it -- a probe that did not run is not evidence
+CREATE VIEW x_verdict_without_cells AS
+  SELECT v.verdict_id FROM setting_verdict v
+   WHERE NOT EXISTS (SELECT 1 FROM setting_verdict_cell vc WHERE vc.verdict_id = v.verdict_id);
+
+-- @check an encode with fewer frames than its cut -- a leg is verified by FRAME COUNT, never exit status
+CREATE VIEW x_encode_short_of_frames AS
+  SELECT e.cell_key, e.frames, k.frames AS cut_frames
+    FROM encode e JOIN cell c ON c.cell_key = e.cell_key
+    JOIN run r ON r.run_id = c.run_id JOIN search s ON s.search_id = r.search_id
+    JOIN content_class cc ON cc.content_class_id = s.content_class_id
+    JOIN cut k ON k.reference_set_id = cc.reference_set_id AND k.window_id = c.window_id AND k.kind = c.cut_kind
+   WHERE e.frames <> k.frames;
+
+-- @check a cell whose identity settings carry no rate-control mode -- the mode is derived from what is set, never read off argv
+CREATE VIEW x_cell_without_a_rate_mode AS
+  SELECT c.cell_key FROM cell c
+   WHERE NOT EXISTS (SELECT 1 FROM cell_setting cs JOIN setting_role sr ON sr.setting_id = cs.setting_id
+                      WHERE cs.cell_key = c.cell_key AND cs.role = 'identity' AND sr.canonical_id = 'rate_control_mode');
+
+-- @check a search scored at a height that is not a served lane's panel height -- the height is a decision, never a default
+CREATE VIEW x_search_height_not_a_lane_height AS
+  SELECT s.search_id, s.score_height FROM search s
+   WHERE NOT EXISTS (SELECT 1 FROM content_class_lane cl JOIN lane l ON l.lane = cl.lane
+                      WHERE cl.content_class_id = s.content_class_id AND l.score_height = s.score_height);
+
+-- @check a score at a height other than its search's -- rows carrying more than one height are refused
+CREATE VIEW x_score_at_another_height AS
+  SELECT sc.cell_key, sc.height, s.score_height FROM score sc
+    JOIN cell c ON c.cell_key = sc.cell_key JOIN run r ON r.run_id = c.run_id JOIN search s ON s.search_id = r.search_id
+   WHERE sc.height <> s.score_height;
+
+-- @check a reference cut in use with no content check passed or classified -- a faithful copy of a broken cut passes every sha
+CREATE VIEW x_reference_cut_unchecked AS
+  SELECT k.cut_id FROM cut k JOIN content_class cc ON cc.reference_set_id = k.reference_set_id
+    JOIN content_class_member m ON m.content_class_id = cc.content_class_id AND m.window_id = k.window_id
+   WHERE k.kind = 'reference'
+     AND NOT EXISTS (SELECT 1 FROM cut_check x WHERE x.cut_id = k.cut_id AND x.result IN ('pass','classified'));
+
+-- @check an encode-stage reference encode discarded before it was scored -- staging is removed only on a clean finish
+CREATE VIEW x_discarded_without_score AS
+  SELECT e.cell_key FROM encode e JOIN cell c ON c.cell_key = e.cell_key JOIN run r ON r.run_id = c.run_id
+   WHERE r.stage = 'encode' AND c.cut_kind = 'reference' AND e.kept = 0
+     AND NOT EXISTS (SELECT 1 FROM score s WHERE s.cell_key = e.cell_key);
+
+-- @check locate arms whose bitrate spans do not intersect on a window -- widen the locate sweep
+CREATE VIEW x_arms_with_disjoint_bitrate_spans AS
+  WITH spans AS (
+    SELECT r.search_id, c.window_id, a.arm_id, min(e.bitrate_kbps) AS lo, max(e.bitrate_kbps) AS hi
+      FROM cell c JOIN run r ON r.run_id = c.run_id AND r.stage = 'locate'
+      JOIN encode e ON e.cell_key = c.cell_key
+      JOIN arm a ON a.search_id = r.search_id AND a.role <> 'incumbent'
+     WHERE NOT EXISTS (SELECT 1 FROM arm_setting ast WHERE ast.arm_id = a.arm_id
+                         AND NOT EXISTS (SELECT 1 FROM cell_setting cs WHERE cs.cell_key = c.cell_key
+                                            AND cs.setting_id = ast.setting_id AND cs.value = ast.value))
+       AND (SELECT count(*) FROM arm_setting ast WHERE ast.arm_id = a.arm_id)
+           = (SELECT count(*) FROM cell_setting cs JOIN setting st ON st.setting_id = cs.setting_id
+               WHERE cs.cell_key = c.cell_key AND cs.role = 'identity' AND st.kind <> 'quality_anchor')
+     GROUP BY r.search_id, c.window_id, a.arm_id)
+  SELECT search_id, window_id, max(lo) AS highest_floor, min(hi) AS lowest_ceiling FROM spans
+   GROUP BY search_id, window_id HAVING count(*) > 1 AND max(lo) > min(hi);
