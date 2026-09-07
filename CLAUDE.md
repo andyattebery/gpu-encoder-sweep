@@ -7,7 +7,7 @@ from `sweep/schema.sql`), `docs/refusals.json` (the invariants, each with the in
 
 ## Rules that are structural here
 
-- **`make check` is the gate**: the named unittest modules, `sweep/model_check.py --mutate` (every
+- **`uv run make check` is the gate** (after `uv sync --locked --extra hub --extra cli`): the named unittest modules, `sweep/model_check.py --mutate` (every
   check must fire on its negative case) and `--check` (the rendered regions of `docs/DATA-MODEL.md`
   are current). Test modules are named, never discovered. No `-` prefixes, no `|| true`.
 - **Edit `sweep/schema.sql`, never the rendered blocks** in `docs/DATA-MODEL.md`; re-render with

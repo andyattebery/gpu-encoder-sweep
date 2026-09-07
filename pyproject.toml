@@ -18,6 +18,7 @@ cli = ["httpx"]
 
 [project.scripts]
 sweep = "sweep.cli.__main__:main"
+sweep-hub = "sweep.hub.app:main"
 sweep-node = "sweep.node.agent:main"
 
 [tool.hatch.build.targets.wheel]

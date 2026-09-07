@@ -12,7 +12,8 @@ a transcode flow runs.
 | `docs/ARCHITECTURE.md` | how it is built: the hub service, the agents, the queue, the exchange, the images, deployment |
 | `docs/refusals.json` | the invariants, each with the incident that bought it and how the harness closes it |
 
-    make check          # the tests, the model proof (every check fires on its negative case), the docs current
+    uv sync --locked --extra hub --extra cli    # the locked environment: uv.lock and .python-version are the one pin
+    uv run make check                           # the tests, the model proof (every check fires on its negative case), the docs current
 
 Status: M0 — the schema, its proof and the docs are here; the hub, the agents and the images follow.
 The images vendor jellyfin-ffmpeg (GPL) and FFVship, which keep their own licences.
