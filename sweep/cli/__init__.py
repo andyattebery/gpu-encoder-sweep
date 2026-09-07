@@ -75,6 +75,9 @@ VERBS = OrderedDict([
     ("author-search", verb("/search/author-search", "search_id", "content_class_id", "encoder_unit_id", "anchor_setting_id", ("score_height", I), "notes",
                            ("arms", jsonarg), ("coarse_rungs", ints), ("targets", jsonarg))),
     ("set-shipping-arm", verb("/search/set-shipping-arm", "search_id", "arm_id")),
+    ("record-viewing", verb("/decision/record-viewing", "kind", "lane", "window_id", "cell_a", "cell_b", "viewed_on", "viewer", "verdict", "notes", "viewed_at")),
+    ("ship", verb("/decision/ship", "lane", "host", ("rows", jsonarg))),
+    ("exclude-route", verb("/decision/exclude-route", "lane", "host", "reason")),
 ])
 
 
