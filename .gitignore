@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.sqlite
+*.db
+.venv/
+build/
+dist/
