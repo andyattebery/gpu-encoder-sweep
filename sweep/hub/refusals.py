@@ -139,3 +139,21 @@ def integrity_refusal(err):
         return Refusal(f"{table}.{col} must be an {wanted}, not {given}" if wanted[0] in "AEIOU" else f"{table}.{col} must be a {wanted}, not {given}",
                        f"give --{col.replace('_', '-')} as {wanted.lower()}")
     return Refusal(msg, "see sweep/schema.sql for the rule that refused it")
+
+
+def validation_refusal(verb, errors, fields):
+    """A body pydantic refused, in the form: the first error, named by its path and the flag that supplies it."""
+    if not errors:
+        return Refusal(f"{verb}: the body is not a JSON object", "post one; the CLI builds it from the flags")
+    e = errors[0]
+    loc = [l for l in e.get("loc", ()) if l != "body"]
+    kind = e.get("type", "")
+    if kind in ("json_invalid", "model_attributes_type", "dict_type", "model_type") or not loc:
+        return Refusal(f"{verb}: the body is not a JSON object", "post one; the CLI builds it from the flags")
+    path = "".join(f"[{l}]" if isinstance(l, int) else (f".{l}" if i else str(l)) for i, l in enumerate(loc))
+    flag = "--" + str(loc[0]).replace("_", "-")
+    if kind == "extra_forbidden":
+        return Refusal(f"{verb} does not take {path!r}", "the fields are: " + ", ".join(fields))
+    if kind == "missing":
+        return Refusal(f"{verb} needs {path!r}", f"give {flag}")
+    return Refusal(f"{verb}: {path} {e.get('msg', 'is invalid')}", f"give {flag} as the body schema says; GET /openapi.json describes it")
