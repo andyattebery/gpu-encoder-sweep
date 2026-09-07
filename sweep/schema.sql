@@ -978,7 +978,7 @@ CREATE VIEW x_shipped_unit_not_on_host AS
    WHERE s.encoder_unit_id IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM host_unit hu WHERE hu.host = s.host AND hu.encoder_unit_id = s.encoder_unit_id);
 
--- @check a lane with content that a unit on a host supports, with a step that has neither a shipped row nor an exclusion with a reason
+-- @check a shipped lane with content that a unit on a host supports, with a step that has neither a shipped row nor an exclusion with a reason -- routing is complete once a lane ships anywhere
 -- @fix ship the step on that host, or exclude-route the lane from it with the reason
 CREATE VIEW x_supported_lane_not_routed AS
   SELECT DISTINCT l.lane, hu.host, ls.step
@@ -987,6 +987,7 @@ CREATE VIEW x_supported_lane_not_routed AS
     JOIN encoder_unit u ON u.codec = l.codec
     JOIN host_unit hu ON hu.encoder_unit_id = u.encoder_unit_id
    WHERE l.has_content = 1
+     AND EXISTS (SELECT 1 FROM shipped s2 WHERE s2.lane = l.lane)
      AND NOT EXISTS (SELECT 1 FROM shipped s WHERE s.lane = l.lane AND s.host = hu.host AND s.step = ls.step)
      AND NOT EXISTS (SELECT 1 FROM routing_exclusion x WHERE x.lane = l.lane AND x.host = hu.host);
 

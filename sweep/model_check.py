@@ -452,11 +452,8 @@ INSERT INTO shipped_setting VALUES
  (5,'nvenc.preset','p2','identity',NULL),(5,'nvenc.tune','uhq','identity',NULL),(5,'nvenc.rc','constqp','identity',NULL),(5,'nvenc.qp','14','identity',NULL),
  (7,'nvenc.preset','p2','identity',NULL),(7,'nvenc.tune','uhq','identity',NULL),(7,'nvenc.rc','constqp','identity',NULL),(7,'nvenc.qp','14','identity',NULL),
  (9,'nvenc.preset','p2','identity',NULL),(9,'nvenc.tune','uhq','identity',NULL),(9,'nvenc.rc','vbr','identity',NULL),(9,'nvenc.b_v','17600000','computed','CEILING');
+-- routing is complete per SHIPPED lane: the AV1 lane ships on media-01, and eta's unit of its codec is excluded with the reason
 INSERT INTO routing_exclusion VALUES
- ('kids-ipad-standard-sdr','media-01','fixture: the kids lanes are not modelled here'),
- ('kids-ipad-standard-hdr','media-01','fixture: the kids lanes are not modelled here'),
- ('kids-ipad-2d-animation-sdr','media-01','fixture: the kids lanes are not modelled here'),
- ('m4-ipad-gt1080p-hdr','media-01','fixture: not modelled here'),
  ('m4-ipad-le1080p-sdr','eta','eta is not yet measured on this class: the B580 column exists and eta has none');
 """
 
@@ -780,8 +777,8 @@ MUTATIONS = [
      "content_rate_meets_floor"),
     ("a floor on a lane whose shipped row has no timing", "UPDATE lane SET min_content_rate = 1 WHERE lane = 'm4-ipad-gt1080p-sdr'",
      "content_rate_meets_floor"),
-    ("a lane a unit supports with no route and no reason",
-     "DELETE FROM routing_exclusion WHERE lane = 'kids-ipad-standard-sdr' AND host = 'media-01'",
+    ("a shipped lane's other host has neither a route nor a reason",
+     "DELETE FROM routing_exclusion WHERE lane = 'm4-ipad-le1080p-sdr' AND host = 'eta'",
      "x_supported_lane_not_routed"),
     ("a shipped unit that is not in that host", "UPDATE shipped SET host = 'eta' WHERE shipped_id = 3",
      "x_shipped_unit_not_on_host"),
