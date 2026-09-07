@@ -976,11 +976,14 @@ CREATE VIEW x_run_state_disagrees_with_events AS
   SELECT r.run_id, r.state, NULL FROM run r
    WHERE r.state <> 'planned' AND NOT EXISTS (SELECT 1 FROM run_event e WHERE e.run_id = r.run_id);
 
--- @check two active runs on one host -- the box is not quiet, and pushing under a live run corrupts it
--- @fix wait for the host's active run to finish, or abandon it; one run per host at a time
-CREATE VIEW x_two_active_runs_on_a_host AS
-  SELECT host, count(*) AS active FROM run WHERE state IN ('launched','running')
-   GROUP BY host HAVING count(*) > 1;
+-- @check a time, split or concurrency run active on a machine with any other active run -- the box is not quiet
+-- @fix wait for the machine's other run to finish, or abandon it; a timing run runs alone on its machine, whichever runtime holds the other
+CREATE VIEW x_timing_run_not_alone AS
+  SELECT t.run_id AS timing_run, o.run_id AS other_run, ht.machine
+    FROM run t JOIN host ht ON ht.host = t.host
+    JOIN run o ON o.run_id <> t.run_id AND o.state IN ('launched','running')
+    JOIN host ho ON ho.host = o.host AND ho.machine = ht.machine
+   WHERE t.stage IN ('time','split','concurrency') AND t.state IN ('launched','running');
 
 -- @check a run on a host that is blocked -- refused at the moment of use, with the fix
 -- @fix unblock-host once the fix it names is done, or plan the run on another host

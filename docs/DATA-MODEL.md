@@ -1467,7 +1467,7 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 | `x_routed_and_excluded` | a lane routed to a host and excluded from it at once | ship a (lane, host) or exclude-route it, never both; an excluded route is not shipped |
 | `x_complete_run_with_planned_cells` | a run marked complete with a cell still planned -- a completed measurement that never came home | every planned cell needs an encode or a failure record before the complete event; post them, or post failed |
 | `x_run_state_disagrees_with_events` | a run whose stored state is not its latest event -- the column and its log disagree | a run's state changes only through an event; post the event and the column follows |
-| `x_two_active_runs_on_a_host` | two active runs on one host -- the box is not quiet, and pushing under a live run corrupts it | wait for the host's active run to finish, or abandon it; one run per host at a time |
+| `x_timing_run_not_alone` | a time, split or concurrency run active on a machine with any other active run -- the box is not quiet | wait for the machine's other run to finish, or abandon it; a timing run runs alone on its machine, whichever runtime holds the other |
 | `x_run_on_a_blocked_host` | a run on a host that is blocked -- refused at the moment of use, with the fix | unblock-host once the fix it names is done, or plan the run on another host |
 | `x_run_unit_not_on_host` | a run whose unit is not in the host it ran on | plan the run on a host that has the unit (add-unit puts a unit on a host) |
 | `x_verdict_without_cells` | a screen verdict with no encodes behind it -- a probe that did not run is not evidence | the screen posts a verdict with the cells it summarises; re-run the probe |

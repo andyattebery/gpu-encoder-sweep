@@ -349,7 +349,7 @@
      "today": ["tools/push_node.py"],
      "test": "A timing run is not handed to an agent while another run is active on its machine; a second enqueue on a host queues instead of launching; no verb pushes code.",
      "disposition": "check",
-     "how": "`x_two_active_runs_on_a_host` (becoming `x_timing_run_not_alone`, per machine): a timing run is refused while any other run is active on its machine; the push half is closed by construction -- an agent runs one job at a time and no code is pushed"},
+     "how": "`x_timing_run_not_alone`, per `host.machine`: a timing run is refused while any other run is active on its machine, whichever runtime holds it, at enqueue and again at claim; the push half is closed by construction -- an agent runs one job at a time and no code is pushed"},
 
     {"id": "orc-prove-the-push",
      "invariant": "After every push, prove arrival by sha on BOTH ends and refuse if they still differ.",
