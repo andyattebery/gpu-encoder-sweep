@@ -141,11 +141,15 @@ def check_tags(conn, tags):
 # ---------------------------------------------------------------- fixture: the B580 lane's shape
 
 FIXTURE = r"""
-INSERT INTO host VALUES
- ('media-01','media-01','linux','/mnt/data/sweep','/opt/jellyfin-ffmpeg/bin/ffmpeg',NULL,NULL),
- ('htpc-01','htpc-01','linux','/run/media/system/data/sweep','/ffmpeg/ffmpeg','root podman; the bind mount is the patched build',
+-- a host is a runtime; media-01 and eta each hold two, nas-01 (the hub's own) has no unit
+INSERT INTO host (host, machine, ssh_host, os, work_root, share_root, local_view, ffmpeg, notes, blocked) VALUES
+ ('nas-01','nas-01','nas-01','linux','/srv/sweep','/srv/sweep',NULL,NULL,'the hub; the share is local',NULL),
+ ('media-01','media-01','media-01','linux','/mnt/data/sweep','/mnt/nas-01/sweep',NULL,'/opt/jellyfin-ffmpeg/bin/ffmpeg',NULL,NULL),
+ ('media-01-score','media-01','media-01','linux','/mnt/data/sweep-score','/mnt/nas-01/sweep','/mnt/data/sweep',NULL,'the score container; sees the encode container''s work root at the same path',NULL),
+ ('htpc-01','htpc-01','htpc-01','linux','/run/media/system/data/sweep','/mnt/nas-01/sweep',NULL,'/ffmpeg/ffmpeg','root podman; the bind mount is the patched build',
   'mount the sweep tree into tdarr-node, point the work root at it, use /ffmpeg/ffmpeg, then clear this'),
- ('eta','eta','windows','D:\sweep','c:\Program Files\jellyfin-ffmpeg\bin\ffmpeg.exe','native Windows, no bash',NULL);
+ ('eta','eta','eta','windows','D:\sweep','\\nas-01\sweep',NULL,'c:\Program Files\jellyfin-ffmpeg\bin\ffmpeg.exe','native Windows, no bash',NULL),
+ ('eta-wsl','eta','eta','linux','/home/sweep/work','/mnt/nas-01/sweep','/mnt/d',NULL,'the score container under WSL; eta''s own cells are scored through /mnt/d',NULL);
 
 INSERT INTO encoder_unit VALUES
  ('intel-b580-ihd26.2.2-qsv-av1','intel','Arc B580','iHD 26.2.2','qsv','av1'),
@@ -296,21 +300,24 @@ INSERT INTO arm_setting VALUES ('arm-a','qsv.preset','4'),('arm-a','qsv.b_strate
 INSERT INTO search_coarse_rung SELECT 'b580-qsv-av1', value FROM (SELECT 12 AS value UNION SELECT 18 UNION SELECT 24 UNION SELECT 30 UNION SELECT 36 UNION SELECT 42);
 INSERT INTO search_target VALUES ('b580-qsv-av1','ssimulacra2','mean',75,NULL),('b580-qsv-av1','ssimulacra2','mean',80,NULL),('b580-qsv-av1','ssimulacra2','mean',85,NULL);
 
-INSERT INTO run (run_id, encoder_unit_id, content_class_id, search_id, host, node_label, stage, ffmpeg_build, ffmpeg_sha,
+-- every run names the artifact its plan was built for; the fixture's is one image digest
+INSERT INTO run (run_id, encoder_unit_id, content_class_id, search_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha,
                  scorer_build, ffvship_version, metric_backend, harness_version, started_at, finished_at) VALUES
- ('b580-qsv-av1','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','encode','8.1.2-Jellyfin','0b0ea2d','ffvship 1.3','1.3','libvmaf_cuda','g0',"2026-09-02T10:00",'2026-09-03T02:00'),
- ('b580-qsv-av1-time','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','time','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-03T10:00','2026-09-03T12:00'),
- ('b580-qsv-av1-screen','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr',NULL,'media-01','media-01-b580','screen','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-01T10:00','2026-09-01T11:03'),
- ('b580-qsv-av1-locate','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','locate','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-02T00:00','2026-09-02T00:40'),
- ('b580-viewing','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr',NULL,'media-01','media-01-b580','viewing','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-04T10:00','2026-09-04T10:10'),
- ('m4-calibrate','nvidia-a4000-595-nvenc-hevc',NULL,NULL,'media-01','media-01','calibrate','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-28T10:00','2026-08-28T14:00');
+ ('b580-qsv-av1','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','encode','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d','ffvship 1.3','1.3','libvmaf_cuda','g0',"2026-09-02T10:00",'2026-09-03T02:00'),
+ ('b580-qsv-av1-time','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','time','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-03T10:00','2026-09-03T12:00'),
+ ('b580-qsv-av1-screen','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr',NULL,'media-01','media-01-b580','screen','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-01T10:00','2026-09-01T11:03'),
+ ('b580-qsv-av1-locate','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','locate','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-02T00:00','2026-09-02T00:40'),
+ ('b580-viewing','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr',NULL,'media-01','media-01-b580','viewing','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-04T10:00','2026-09-04T10:10'),
+ ('m4-calibrate','nvidia-a4000-595-nvenc-hevc',NULL,NULL,'media-01','media-01','calibrate','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-28T10:00','2026-08-28T14:00');
 -- HEADROOM 0.98 is the fixture's stand-in: the incumbent request factor, which overshoots and is unmeasured
 INSERT INTO constant_value VALUES
  ('HEADROOM','m4-calibrate',0.98,'2026-08-28'),('BOUND','m4-calibrate',20,'2026-08-28'),
  ('RUNG_FACTOR','m4-calibrate',0.8374,'2026-08-28'),('HOST_THRESHOLD','m4-calibrate',10.0,'2026-08-28');
 UPDATE run SET state = 'complete', fetched_at = finished_at, verified_at = finished_at;
-INSERT INTO run_event SELECT run_id, started_at, 'launched', 'claimed; the agent reports the artifact the plan names' FROM run;
-INSERT INTO run_event SELECT run_id, finished_at, 'complete', 'count and heights verified against the plan' FROM run;
+-- the hub launches at claim and completes after verifying; the agent reports running
+INSERT INTO run_event SELECT run_id, started_at, 'launched', 'claimed; the agent reports the artifact the plan names', 'hub' FROM run;
+INSERT INTO run_event SELECT run_id, started_at || ':30', 'running', 'first cell started', 'agent' FROM run;
+INSERT INTO run_event SELECT run_id, finished_at, 'complete', 'count and heights verified against the plan', 'hub' FROM run;
 INSERT INTO run_window SELECT 'b580-qsv-av1', window_id FROM content_class_member WHERE content_class_id = 'native-1080p-sdr';
 INSERT INTO run_window SELECT 'b580-qsv-av1-time', window_id FROM content_class_member WHERE content_class_id = 'native-1080p-sdr';
 INSERT INTO run_window VALUES ('b580-qsv-av1-screen','tng');
@@ -825,6 +832,11 @@ DDL_REFUSALS = [
     ("a failure with no stderr", "INSERT INTO cell_failure VALUES ('c-b24-tng', '2026-09-02', NULL, 1)"),
     ("a complete run never verified", "UPDATE run SET verified_at = NULL WHERE run_id = 'b580-qsv-av1'"),
     ("a cap-bound lane with no cap constant", "UPDATE lane SET bitrate_cap_binds = 'never', bitrate_cap_constant = NULL WHERE lane = 'm4-ipad-gt1080p-sdr'"),
+    ("a host with no machine", "INSERT INTO host (host, ssh_host, os, work_root, ffmpeg) VALUES ('h', 'h', 'linux', '/w', '/f')"),
+    ("a run with no artifact",
+     "INSERT INTO run (run_id, encoder_unit_id, host, node_label, stage, ffmpeg_build, ffmpeg_sha, harness_version, started_at) "
+     "VALUES ('r', 'intel-b580-ihd26.2.2-qsv-av1', 'media-01', 'media-01-b580', 'probe', 'b', 's', 'g0', '2026-09-05')"),
+    ("an event by nobody", "INSERT INTO run_event (run_id, at, state) VALUES ('b580-qsv-av1', '2026-09-03T03:00', 'running')"),
 ]
 
 

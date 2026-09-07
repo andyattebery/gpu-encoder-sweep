@@ -360,8 +360,8 @@ No writer derives its header from the first row it happens to have.
 ### Reference — the catalogue everything else points at
 
 <!-- BEGIN GENERATED: schema:reference -->
-    host                   host · ssh_host · os ∈ {linux, windows} · work_root · ffmpeg · notes
-                           · blocked                                                               FILE
+    host                   host · machine · ssh_host · os ∈ {linux, windows} · work_root
+                           · share_root · local_view · ffmpeg · notes · blocked                    FILE
     encoder_unit           encoder_unit_id · vendor ∈ {nvidia, amd, intel} · card · driver
                            · frontend ∈ {nvenc, vaapi, qsv} · codec ∈ {hevc, av1}                  FILE
     host_unit              host · encoder_unit_id · device                                         FILE
@@ -524,13 +524,14 @@ flag, and `cell_setting` is what it became.
     run                    run_id · encoder_unit_id · content_class_id · search_id · host
                            · node_label
                            · stage ∈ {screen, locate, encode, time, split, concurrency, viewing, probe, calibrate}
-                           · ffmpeg_build · ffmpeg_sha · scorer_build · ffvship_version
-                           · metric_backend · harness_version · started_at · finished_at
+                           · artifact · ffmpeg_build · ffmpeg_sha · scorer_build
+                           · ffvship_version · metric_backend · harness_version · started_at
+                           · finished_at
                            · state ∈ {planned, launched, running, complete, failed, abandoned}
                            · fetched_at · verified_at                                              ROW (orchestrate)
     run_event              run_id · at
                            · state ∈ {planned, launched, running, complete, failed, abandoned}
-                           · detail                                                                ROW (orchestrate)
+                           · detail · by ∈ {hub, agent}                                            ROW (orchestrate)
     run_window             run_id · window_id                                                      ROW (orchestrate)
     cell                   cell_key · run_id · window_id
                            · cut_kind ∈ {reference, source, library}                               ROW (orchestrate)
@@ -644,9 +645,12 @@ erDiagram
     lane ||--o{ chain : "lane"
     host {
         TEXT host PK
+        TEXT machine
         TEXT ssh_host
         TEXT os "linux | windows"
         TEXT work_root
+        TEXT share_root
+        TEXT local_view
         TEXT ffmpeg
         TEXT notes
         TEXT blocked
@@ -895,6 +899,7 @@ erDiagram
         TEXT host FK
         TEXT node_label
         TEXT stage "screen | locate | encode | time | split | concurrency | viewing | probe | calibrate"
+        TEXT artifact
         TEXT ffmpeg_build
         TEXT ffmpeg_sha
         TEXT scorer_build
@@ -912,6 +917,7 @@ erDiagram
         TEXT at PK
         TEXT state PK "planned | launched | running | complete | failed | abandoned"
         TEXT detail
+        TEXT by "hub | agent"
     }
     run_window {
         TEXT run_id PK, FK

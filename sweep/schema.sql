@@ -24,14 +24,17 @@ PRAGMA foreign_keys = ON;
 -- @group reference
 -- @class FILE
 -- @writer authored
-CREATE TABLE host (
-  host        TEXT PRIMARY KEY,                           -- media-01 | htpc-01 | eta
+CREATE TABLE host (                                         -- a RUNTIME: an encode container, a score container, a native install; a machine may hold several
+  host        TEXT PRIMARY KEY,                           -- media-01 | media-01-score | htpc-01 | eta | eta-wsl | nas-01
+  machine     TEXT NOT NULL,                              -- the box; the quiet-box rule is per machine
   ssh_host    TEXT NOT NULL,
   os          TEXT NOT NULL CHECK (os IN ('linux','windows')),
   work_root   TEXT NOT NULL,
-  ffmpeg      TEXT NOT NULL,                               -- the patched build's path on this host
+  share_root  TEXT NOT NULL,                              -- the share in this host's spelling
+  local_view  TEXT,                                       -- how this runtime sees another's work root on the same machine
+  ffmpeg      TEXT,                                       -- the patched build's path on this host; NULL on a host with no units (the hub's own, a scorer)
   notes       TEXT,
-  blocked     TEXT                                         -- NULL = usable; otherwise THE FIX, and a run on it is refused at the moment of use
+  blocked     TEXT                                        -- NULL = usable; otherwise THE FIX, and a run on it is refused at the moment of use
 ) STRICT;
 
 -- @group reference
@@ -341,6 +344,7 @@ CREATE TABLE run (                                          -- one invocation
   host             TEXT NOT NULL REFERENCES host,           -- where it RAN; not part of the measurement key
   node_label       TEXT NOT NULL,                           -- a distinct ledger identity per card in a multi-card box
   stage            TEXT NOT NULL CHECK (stage IN ('screen','locate','encode','time','split','concurrency','viewing','probe','calibrate')),
+  artifact         TEXT NOT NULL,                           -- what the plan was built for: the image digest, or the package version and sha; the agent reports it
   ffmpeg_build     TEXT NOT NULL,
   ffmpeg_sha       TEXT NOT NULL,
   scorer_build     TEXT,
@@ -363,6 +367,7 @@ CREATE TABLE run_event (                                    -- append-only trans
   at     TEXT NOT NULL,
   state  TEXT NOT NULL CHECK (state IN ('planned','launched','running','complete','failed','abandoned')),
   detail TEXT,                                              -- the claim and the artifact the agent reported, the failure
+  by     TEXT NOT NULL CHECK (by IN ('hub','agent')),       -- who wrote it: the hub plans, launches at claim and completes; the agent reports
   PRIMARY KEY (run_id, at, state)
 ) STRICT;
 
