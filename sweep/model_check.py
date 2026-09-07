@@ -161,6 +161,9 @@ INSERT INTO host_unit VALUES
  ('media-01','nvidia-a4000-595-nvenc-hevc','pci-0000:41:00.0'),
  ('eta','nvidia-5060ti-595-nvenc-av1','pci-0000:01:00.0');
 
+-- the scorer: one per score host, the argv and backend it scores with
+INSERT INTO scorer VALUES ('media-01-score','["/usr/local/bin/FFVship"]','["/opt/jellyfin-ffmpeg/bin/ffmpeg"]','libvmaf_cuda',0,'/mnt/data/sweep-score/cache');
+
 INSERT INTO canonical_concept VALUES
  ('quality_anchor','a position on the codec ladder: -qp, -cq, -global_quality, -q:v'),
  ('rate_control_mode','constant-quantiser versus rate-targeted: -rc constqp, -rc_mode CQP, qsv -q:v'),
@@ -799,6 +802,8 @@ MUTATIONS = [
     ("a timing run beside a score run on the other runtime of its machine",
      "UPDATE run SET state = 'running' WHERE run_id IN ('b580-qsv-av1-time', 'b580-qsv-av1-score')",
      "x_timing_run_not_alone"),
+    ("a score run on a host with no scorer", "DELETE FROM scorer WHERE host = 'media-01-score'",
+     "x_score_run_host_without_scorer"),
     ("a run whose unit is not in its host", "UPDATE run SET host = 'eta' WHERE run_id = 'b580-qsv-av1-screen'",
      "x_run_unit_not_on_host"),
     ("a verdict with no encodes behind it", "DELETE FROM setting_verdict_cell WHERE verdict_id = 3",
@@ -870,6 +875,7 @@ DDL_REFUSALS = [
      "INSERT INTO run (run_id, encoder_unit_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha, harness_version, started_at) "
      "VALUES ('r', 'intel-b580-ihd26.2.2-qsv-av1', 'media-01-score', 'media-01-score', 'score', 'a', 'b', 's', 'g0', '2026-09-05')"),
     ("an encode run with a parent", "UPDATE run SET parent_run_id = 'b580-qsv-av1-locate' WHERE run_id = 'b580-qsv-av1'"),
+    ("a scorer with an unknown backend", "INSERT INTO scorer VALUES ('eta-wsl', '[]', '[]', 'vmaf', 0, '/c')"),
     ("an event by nobody", "INSERT INTO run_event (run_id, at, state) VALUES ('b580-qsv-av1', '2026-09-03T03:00', 'running')"),
 ]
 

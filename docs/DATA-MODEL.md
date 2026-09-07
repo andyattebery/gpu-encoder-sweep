@@ -68,6 +68,7 @@ schema's tables are named for them.** `SPEC.md` uses the same words.
 | **content rate** | content minutes per wall minute for a `(lane, host)` at the shipped setting and N\*; the deadline read | fps | Stage 11's output |
 | **throughput floor** | the content rate a host must reach for a lane; per lane, because the M4 lanes tolerate slower conversion; NULL reports only | | `lane.min_content_rate` |
 | **host unit** | which units are in which box; routing reads it, the measurement key does not | | `host_unit` |
+| **scorer** | the intent of scoring on a host: the FFVship and ffmpeg argv, the metric backend, the card, the cache; the build that ran is on the score run | a host · a build | `scorer` |
 | **routing** | every host with a unit of the lane's codec gets a row per step, or an exclusion with a reason | policy | `shipped`, `routing_exclusion` |
 | **fixed** | the provenance of a remux row: no encoder decision | derived | `shipped.provenance` |
 | **run state** | one stored column, planned · launched · running · complete · failed · abandoned, with `run_event` as its log; a cell's state is derived from its rows | a log file | `run.state`, `run_event`, `v_cell_state` |
@@ -366,6 +367,8 @@ No writer derives its header from the first row it happens to have.
     encoder_unit           encoder_unit_id · vendor ∈ {nvidia, amd, intel} · card · driver
                            · frontend ∈ {nvenc, vaapi, qsv} · codec ∈ {hevc, av1}                  FILE
     host_unit              host · encoder_unit_id · device                                         FILE
+    scorer                 host · ffvship · score_ffmpeg
+                           · metric_backend ∈ {libvmaf, libvmaf_cuda} · gpu_id · cache_dir         FILE
     canonical_concept      canonical_id · description                                              FILE
     setting                setting_id · flag · frontend ∈ {nvenc, vaapi, qsv}
                            · kind ∈ {quality_anchor, mode_selector, ordinal, option}
@@ -633,6 +636,7 @@ its columns. Below them, every foreign key as a list.
 erDiagram
     encoder_unit ||--o{ host_unit : "encoder_unit_id"
     host ||--o{ host_unit : "host"
+    host ||--|| scorer : "host"
     setting ||--o{ setting_enum_value : "setting_id"
     canonical_concept ||--o{ setting_role : "canonical_id"
     setting ||--o{ setting_role : "setting_id"
@@ -671,6 +675,14 @@ erDiagram
         TEXT host PK, FK
         TEXT encoder_unit_id PK, FK
         TEXT device
+    }
+    scorer {
+        TEXT host PK, FK
+        TEXT ffvship
+        TEXT score_ffmpeg
+        TEXT metric_backend "libvmaf | libvmaf_cuda"
+        INTEGER gpu_id
+        TEXT cache_dir
     }
     canonical_concept {
         TEXT canonical_id PK
@@ -1117,6 +1129,7 @@ Every foreign key, child to parent:
 
     host_unit.encoder_unit_id -> encoder_unit.encoder_unit_id
     host_unit.host -> host.host
+    scorer.host -> host.host
     setting_enum_value.setting_id -> setting.setting_id
     setting_role.canonical_id -> canonical_concept.canonical_id
     setting_role.setting_id -> setting.setting_id
@@ -1341,7 +1354,7 @@ outside the ladder is `UNREACHABLE`, not a number.
     calibrate     ->  constant_value
     ship          ->  shipped · shipped_setting · routing_exclusion
     viewing       ->  viewing_verdict
-    authored      ->  host · encoder_unit · host_unit · canonical_concept · setting
+    authored      ->  host · encoder_unit · host_unit · scorer · canonical_concept · setting
                       · setting_enum_value · setting_role · setting_scope · constant · lane
                       · lane_step · constant_scope · ladder · ladder_rung · chain · window
                       · content_class · content_class_lane · content_class_member
@@ -1486,6 +1499,7 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 | `x_run_state_disagrees_with_events` | a run whose stored state is not its latest event -- the column and its log disagree | a run's state changes only through an event; post the event and the column follows |
 | `x_timing_run_not_alone` | a time, split or concurrency run active on a machine with any other active run -- the box is not quiet | wait for the machine's other run to finish, or abandon it; a timing run runs alone on its machine, whichever runtime holds the other |
 | `x_run_on_a_blocked_host` | a run on a host that is blocked -- refused at the moment of use, with the fix | unblock-host once the fix it names is done, or plan the run on another host |
+| `x_score_run_host_without_scorer` | a score run on a host with no scorer row -- the plan could not say what to score with | add-scorer for the host, or score on a host that has one |
 | `x_run_unit_not_on_host` | a run whose unit is not in the host it ran on -- a score run is exempt: its unit is its parent's, and its host holds the scorer | plan the run on a host that has the unit (add-unit puts a unit on a host) |
 | `x_verdict_without_cells` | a screen verdict with no encodes behind it -- a probe that did not run is not evidence | the screen posts a verdict with the cells it summarises; re-run the probe |
 | `x_encode_short_of_frames` | an encode with fewer frames than its cut -- a leg is verified by FRAME COUNT, never exit status | the encode did not run to the end; read its stderr, fix the cause and re-encode the cell |

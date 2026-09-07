@@ -63,6 +63,18 @@ CREATE TABLE host_unit (                                    -- which units are i
 -- @group reference
 -- @class FILE
 -- @writer authored
+CREATE TABLE scorer (                                       -- the INTENT of scoring on a host: argv, backend, card, cache; the build that ran is run.scorer_build, from the artifact the agent reports
+  host           TEXT PRIMARY KEY REFERENCES host,
+  ffvship        TEXT NOT NULL,                             -- argv, compact JSON
+  score_ffmpeg   TEXT NOT NULL,                             -- argv, compact JSON
+  metric_backend TEXT NOT NULL CHECK (metric_backend IN ('libvmaf','libvmaf_cuda')),
+  gpu_id         INTEGER NOT NULL,
+  cache_dir      TEXT NOT NULL
+) STRICT;
+
+-- @group reference
+-- @class FILE
+-- @writer authored
 CREATE TABLE canonical_concept (                            -- one concept, several vendor spellings
   canonical_id TEXT PRIMARY KEY,                            -- quality_anchor | rate_control_mode | preset ...
   description  TEXT NOT NULL
@@ -1002,6 +1014,12 @@ CREATE VIEW x_timing_run_not_alone AS
 CREATE VIEW x_run_on_a_blocked_host AS
   SELECT r.run_id, h.host, h.blocked FROM run r JOIN host h ON h.host = r.host
    WHERE h.blocked IS NOT NULL AND r.state <> 'abandoned';
+
+-- @check a score run on a host with no scorer row -- the plan could not say what to score with
+-- @fix add-scorer for the host, or score on a host that has one
+CREATE VIEW x_score_run_host_without_scorer AS
+  SELECT r.run_id, r.host FROM run r
+   WHERE r.stage = 'score' AND NOT EXISTS (SELECT 1 FROM scorer s WHERE s.host = r.host);
 
 -- @check a run whose unit is not in the host it ran on -- a score run is exempt: its unit is its parent's, and its host holds the scorer
 -- @fix plan the run on a host that has the unit (add-unit puts a unit on a host)
