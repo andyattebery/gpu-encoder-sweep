@@ -714,12 +714,14 @@ CREATE VIEW v_run_progress AS
 -- ============================================================================ CHECKS (x_*): each must return ZERO rows
 
 -- @check a lane marked has_content whose population is EMPTY (the other direction is judgement: flow membership narrows)
+-- @fix add-lane with input bounds a scanned title fits, or with has_content 0; an empty population is not a lane with content
 CREATE VIEW x_has_content_but_empty AS
   SELECT l.lane FROM lane l
    WHERE l.has_content = 1
      AND NOT EXISTS (SELECT 1 FROM v_lane_population p WHERE p.lane = l.lane);
 
 -- @check a shipped quality anchor that is not a rung on its lane's codec's ladder
+-- @fix ship an anchor value that is a rung of the lane's codec ladder (add-ladder lists them); a value off the ladder was never encoded on every member
 CREATE VIEW x_shipped_not_a_rung AS
   SELECT s.shipped_id, s.lane, ss.setting_id, ss.value
     FROM shipped s
@@ -731,6 +733,7 @@ CREATE VIEW x_shipped_not_a_rung AS
                       WHERE r.ladder_id = ld.ladder_id AND r.rung = CAST(ss.value AS INTEGER));
 
 -- @check a `measured` value whose evidence class has NO member in the lane's population
+-- @fix define-class with a member from the lane's population, or ship the value as policy with its reason
 CREATE VIEW x_measured_without_representation AS
   SELECT s.shipped_id, s.lane, s.content_class_id
     FROM shipped s
@@ -741,6 +744,7 @@ CREATE VIEW x_measured_without_representation AS
                       WHERE m.content_class_id = s.content_class_id);
 
 -- @check a `measured` value whose evidence class is not sampled for that lane
+-- @fix name an evidence class that serves the lane (define-class lists its lanes), or ship the value as policy with its reason
 CREATE VIEW x_measured_on_a_class_not_for_the_lane AS
   SELECT s.shipped_id, s.lane, s.content_class_id
     FROM shipped s
@@ -749,6 +753,7 @@ CREATE VIEW x_measured_on_a_class_not_for_the_lane AS
                       WHERE cl.content_class_id = s.content_class_id AND cl.lane = s.lane);
 
 -- @check a constant applied outside its scope
+-- @fix scope-constant the constant to the lane before a shipped setting cites it
 CREATE VIEW x_constant_outside_scope AS
   SELECT s.shipped_id, s.lane, ss.from_constant
     FROM shipped s JOIN shipped_setting ss ON ss.shipped_id = s.shipped_id
@@ -756,6 +761,7 @@ CREATE VIEW x_constant_outside_scope AS
      AND NOT EXISTS (SELECT 1 FROM constant_scope c WHERE c.name = ss.from_constant AND c.lane = s.lane);
 
 -- @check a run that covered a window outside its declared class
+-- @fix plan the run over the class's members only; a window outside the class belongs to another run
 CREATE VIEW x_run_outside_class AS
   SELECT rw.run_id, rw.window_id
     FROM run_window rw JOIN run r ON r.run_id = rw.run_id
@@ -764,18 +770,21 @@ CREATE VIEW x_run_outside_class AS
                       WHERE m.content_class_id = r.content_class_id AND m.window_id = rw.window_id);
 
 -- @check a cell on a window its run never declared covering
+-- @fix plan the cell's window into the run before its cells; a cell on an uncovered window has no cut to encode
 CREATE VIEW x_cell_outside_run_coverage AS
   SELECT c.cell_key, c.run_id, c.window_id
     FROM cell c
    WHERE NOT EXISTS (SELECT 1 FROM run_window rw WHERE rw.run_id = c.run_id AND rw.window_id = c.window_id);
 
 -- @check a cell_setting value outside the setting's enumeration
+-- @fix use one of the setting's enumerated values (add-setting lists them); the encoder would refuse the rest
 CREATE VIEW x_setting_value_outside_enum AS
   SELECT cs.cell_key, cs.setting_id, cs.value
     FROM cell_setting cs JOIN setting s ON s.setting_id = cs.setting_id AND s.value_type = 'enum'
    WHERE NOT EXISTS (SELECT 1 FROM setting_enum_value e WHERE e.setting_id = cs.setting_id AND e.value = cs.value);
 
 -- @check a cell whose quality anchor lies outside the setting's declared range -- a target past the encoder's range is UNREACHABLE, never a cell
+-- @fix keep the anchor within the setting's range_lo..range_hi; report a target past the range as UNREACHABLE instead of planning a cell
 CREATE VIEW x_cell_anchor_outside_range AS
   SELECT cs.cell_key, cs.setting_id, cs.value, s.range_lo, s.range_hi
     FROM cell_setting cs JOIN setting s ON s.setting_id = cs.setting_id AND s.kind = 'quality_anchor'
@@ -783,6 +792,7 @@ CREATE VIEW x_cell_anchor_outside_range AS
       OR (s.range_hi IS NOT NULL AND CAST(cs.value AS REAL) > s.range_hi);
 
 -- @check a reference cut built with the chain of a lane its class does not serve
+-- @fix materialise the cut with the chain of a lane the class serves, or define-class with the chain's lane
 CREATE VIEW x_cut_chain_not_a_served_lane AS
   SELECT c.cut_id, c.chain_lane
     FROM cut c JOIN content_class cc ON cc.reference_set_id = c.reference_set_id
@@ -791,6 +801,7 @@ CREATE VIEW x_cut_chain_not_a_served_lane AS
                       WHERE cl.content_class_id = cc.content_class_id AND cl.lane = c.chain_lane);
 
 -- @check a class member with no reference cut in the class's reference set
+-- @fix materialise the class's reference set over every member before define-class names them
 CREATE VIEW x_member_without_reference_cut AS
   SELECT m.content_class_id, m.window_id
     FROM content_class_member m JOIN content_class cc ON cc.content_class_id = m.content_class_id
@@ -798,17 +809,20 @@ CREATE VIEW x_member_without_reference_cut AS
                       WHERE c.reference_set_id = cc.reference_set_id AND c.window_id = m.window_id AND c.kind = 'reference');
 
 -- @check a class that serves no lane
+-- @fix define-class with at least one lane; a class exists to give a lane its evidence
 CREATE VIEW x_class_serves_no_lane AS
   SELECT cc.content_class_id FROM content_class cc
    WHERE NOT EXISTS (SELECT 1 FROM content_class_lane cl WHERE cl.content_class_id = cc.content_class_id);
 
 -- @check a shipped encode step on a host with no chain for that lane -- the build order could not emit a command
+-- @fix author-chain for the lane on that host before ship; the build order emits its command from the chain
 CREATE VIEW x_shipped_without_chain AS
   SELECT s.shipped_id, s.lane, s.host FROM shipped s
    WHERE s.step IN ('quality-target-encode','bitrate-target-encode')
      AND NOT EXISTS (SELECT 1 FROM chain c WHERE c.lane = s.lane AND c.host = s.host);
 
 -- @check a screen verdict taken under a base the unit is not MEASURED to honour on that window
+-- @fix screen the base setting on that window first, to HONOURED; a verdict under an unhonoured base measures nothing
 CREATE VIEW x_verdict_on_unmeasured_base AS
   SELECT v.verdict_id, v.setting_id, v.base_setting_id FROM setting_verdict v
    WHERE v.base_setting_id IS NOT NULL
@@ -817,6 +831,7 @@ CREATE VIEW x_verdict_on_unmeasured_base AS
                         AND b.window_id = v.window_id AND b.verdict = 'HONOURED');
 
 -- @check an arm using a setting the unit is not MEASURED to honour on any member of the class
+-- @fix screen the setting on a member of the class to HONOURED before author-search puts it in an arm
 CREATE VIEW x_arm_setting_not_honoured AS
   SELECT a.arm_id, ast.setting_id
     FROM arm_setting ast JOIN arm a ON a.arm_id = ast.arm_id JOIN search s ON s.search_id = a.search_id
@@ -825,17 +840,20 @@ CREATE VIEW x_arm_setting_not_honoured AS
                       WHERE v.encoder_unit_id = s.encoder_unit_id AND v.setting_id = ast.setting_id AND v.verdict = 'HONOURED');
 
 -- @check a derived ladder whose run is not a LOCATE run of the same search
+-- @fix derive-ladders from the search's own locate run; a ladder derived from any other run is discarded
 CREATE VIEW x_ladder_from_a_non_locate_run AS
   SELECT l.run_id, l.arm_id FROM arm_ladder_rung l JOIN run r ON r.run_id = l.run_id JOIN arm a ON a.arm_id = l.arm_id
    WHERE r.stage <> 'locate' OR r.search_id IS NOT a.search_id
    GROUP BY l.run_id, l.arm_id;
 
 -- @check an (arm, window) ladder with fewer than four rungs -- bd_rate's floor
+-- @fix widen the locate sweep until every (arm, window) has four rungs; bd_rate has no meaning below that
 CREATE VIEW x_ladder_below_floor AS
   SELECT run_id, arm_id, window_id, count(*) AS rungs FROM arm_ladder_rung
    GROUP BY run_id, arm_id, window_id HAVING count(*) < 4;
 
 -- @check a viewing verdict on an encode that was discarded, either of a pair or an acceptance's one -- scoring deletes; the viewing re-encodes and keeps
+-- @fix record-viewing on kept encodes only: re-encode the cell in a viewing run, which keeps its output
 CREATE VIEW x_viewing_on_a_discarded_encode AS
   SELECT g.viewing_id FROM viewing_verdict g
    WHERE NOT EXISTS (SELECT 1 FROM encode e WHERE e.cell_key = g.cell_a AND e.kept = 1)
@@ -843,6 +861,7 @@ CREATE VIEW x_viewing_on_a_discarded_encode AS
           AND NOT EXISTS (SELECT 1 FROM encode e WHERE e.cell_key = g.cell_b AND e.kept = 1));
 
 -- @check a search without exactly one base arm
+-- @fix author-search with exactly one arm of role base
 CREATE VIEW x_search_arm_roles AS
   SELECT s.search_id, coalesce(sum(a.role = 'base'), 0) AS base_arms
     FROM search s LEFT JOIN arm a ON a.search_id = s.search_id
@@ -850,11 +869,13 @@ CREATE VIEW x_search_arm_roles AS
   HAVING coalesce(sum(a.role = 'base'), 0) <> 1;
 
 -- @check a shipping arm that belongs to another search
+-- @fix set-shipping-arm with an arm of the same search
 CREATE VIEW x_shipping_arm_not_in_search AS
   SELECT s.search_id, s.shipping_arm_id FROM search s JOIN arm a ON a.arm_id = s.shipping_arm_id
    WHERE a.search_id <> s.search_id;
 
 -- @check a locate cell whose anchor value is not on the search's coarse ladder
+-- @fix plan locate cells at the search's coarse rungs only (author-search lists them)
 CREATE VIEW x_locate_cell_off_the_coarse_ladder AS
   SELECT c.cell_key, cs.value
     FROM cell c JOIN run r ON r.run_id = c.run_id AND r.stage = 'locate'
@@ -864,6 +885,7 @@ CREATE VIEW x_locate_cell_off_the_coarse_ladder AS
                       WHERE k.search_id = s.search_id AND k.rung = CAST(cs.value AS INTEGER));
 
 -- @check a search serving an incumbent-bound lane without exactly one incumbent arm
+-- @fix author-search with exactly one incumbent arm when a served lane's decision rule is incumbent
 CREATE VIEW x_incumbent_rule_without_incumbent_arm AS
   SELECT s.search_id, cl.lane FROM search s
     JOIN content_class_lane cl ON cl.content_class_id = s.content_class_id
@@ -871,6 +893,7 @@ CREATE VIEW x_incumbent_rule_without_incumbent_arm AS
    WHERE (SELECT count(*) FROM arm a WHERE a.search_id = s.search_id AND a.role = 'incumbent') <> 1;
 
 -- @check a search serving a target-bound lane with no target
+-- @fix author-search with a target for the served target-bound lane, taken from its acceptance viewing
 CREATE VIEW x_target_rule_without_targets AS
   SELECT s.search_id, cl.lane FROM search s
     JOIN content_class_lane cl ON cl.content_class_id = s.content_class_id
@@ -878,12 +901,14 @@ CREATE VIEW x_target_rule_without_targets AS
    WHERE NOT EXISTS (SELECT 1 FROM search_target t WHERE t.search_id = s.search_id);
 
 -- @check a measured constant that was never calibrated -- its value would be a typed number
+-- @fix calibrate the constant from a calibrate run before a lane in its scope ships; a typed number is not a measurement
 CREATE VIEW x_measured_constant_never_calibrated AS
   SELECT c.name FROM constant c
    WHERE c.provenance = 'measured'
      AND NOT EXISTS (SELECT 1 FROM constant_value v WHERE v.name = c.name);
 
 -- @check a target-bound lane's target that does not come from an acceptance viewing for that lane
+-- @fix record-viewing an acceptance for the lane first, then author-search with the target naming that viewing
 CREATE VIEW x_target_without_a_viewing AS
   SELECT st.search_id, st.target, cl.lane
     FROM search_target st
@@ -894,6 +919,7 @@ CREATE VIEW x_target_without_a_viewing AS
                       WHERE v.viewing_id = st.viewing_id AND v.kind = 'acceptance' AND v.lane = cl.lane);
 
 -- @check an incumbent arm that no acceptance viewing, for a lane the search serves, found acceptable
+-- @fix record-viewing an acceptance of the incumbent's encode for a served lane, then author-search naming it as accepted_by_viewing
 CREATE VIEW x_incumbent_arm_not_viewed AS
   SELECT a.arm_id, a.search_id
     FROM arm a JOIN search s ON s.search_id = a.search_id
@@ -903,12 +929,14 @@ CREATE VIEW x_incumbent_arm_not_viewed AS
                       WHERE v.viewing_id = a.accepted_by_viewing AND v.kind = 'acceptance' AND v.verdict = 'acceptable');
 
 -- @check a shipped row naming a unit that is not in that host
+-- @fix add-unit the unit on that host, or ship the unit the host has
 CREATE VIEW x_shipped_unit_not_on_host AS
   SELECT s.shipped_id, s.host, s.encoder_unit_id FROM shipped s
    WHERE s.encoder_unit_id IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM host_unit hu WHERE hu.host = s.host AND hu.encoder_unit_id = s.encoder_unit_id);
 
 -- @check a lane with content that a unit on a host supports, with a step that has neither a shipped row nor an exclusion with a reason
+-- @fix ship the step on that host, or exclude-route the lane from it with the reason
 CREATE VIEW x_supported_lane_not_routed AS
   SELECT DISTINCT l.lane, hu.host, ls.step
     FROM lane l
@@ -920,17 +948,20 @@ CREATE VIEW x_supported_lane_not_routed AS
      AND NOT EXISTS (SELECT 1 FROM routing_exclusion x WHERE x.lane = l.lane AND x.host = hu.host);
 
 -- @check a lane routed to a host and excluded from it at once
+-- @fix ship a (lane, host) or exclude-route it, never both; an excluded route is not shipped
 CREATE VIEW x_routed_and_excluded AS
   SELECT x.lane, x.host FROM routing_exclusion x
    WHERE EXISTS (SELECT 1 FROM shipped s WHERE s.lane = x.lane AND s.host = x.host);
 
 -- @check a run marked complete with a cell still planned -- a completed measurement that never came home
+-- @fix every planned cell needs an encode or a failure record before the complete event; post them, or post failed
 CREATE VIEW x_complete_run_with_planned_cells AS
   SELECT r.run_id, count(*) AS still_planned FROM run r JOIN v_cell_state cs ON cs.run_id = r.run_id
    WHERE r.state = 'complete' AND cs.state = 'planned'
    GROUP BY r.run_id;
 
 -- @check a run whose stored state is not its latest event -- the column and its log disagree
+-- @fix a run's state changes only through an event; post the event and the column follows
 CREATE VIEW x_run_state_disagrees_with_events AS
   SELECT r.run_id, r.state, e.state AS latest_event FROM run r
     JOIN run_event e ON e.run_id = r.run_id
@@ -941,26 +972,31 @@ CREATE VIEW x_run_state_disagrees_with_events AS
    WHERE r.state <> 'planned' AND NOT EXISTS (SELECT 1 FROM run_event e WHERE e.run_id = r.run_id);
 
 -- @check two active runs on one host -- the box is not quiet, and pushing under a live run corrupts it
+-- @fix wait for the host's active run to finish, or abandon it; one run per host at a time
 CREATE VIEW x_two_active_runs_on_a_host AS
   SELECT host, count(*) AS active FROM run WHERE state IN ('launched','running')
    GROUP BY host HAVING count(*) > 1;
 
 -- @check a run on a host that is blocked -- refused at the moment of use, with the fix
+-- @fix unblock-host once the fix it names is done, or plan the run on another host
 CREATE VIEW x_run_on_a_blocked_host AS
   SELECT r.run_id, h.host, h.blocked FROM run r JOIN host h ON h.host = r.host
    WHERE h.blocked IS NOT NULL AND r.state <> 'abandoned';
 
 -- @check a run whose unit is not in the host it ran on
+-- @fix plan the run on a host that has the unit (add-unit puts a unit on a host)
 CREATE VIEW x_run_unit_not_on_host AS
   SELECT r.run_id, r.host, r.encoder_unit_id FROM run r
    WHERE NOT EXISTS (SELECT 1 FROM host_unit hu WHERE hu.host = r.host AND hu.encoder_unit_id = r.encoder_unit_id);
 
 -- @check a screen verdict with no encodes behind it -- a probe that did not run is not evidence
+-- @fix the screen posts a verdict with the cells it summarises; re-run the probe
 CREATE VIEW x_verdict_without_cells AS
   SELECT v.verdict_id FROM setting_verdict v
    WHERE NOT EXISTS (SELECT 1 FROM setting_verdict_cell vc WHERE vc.verdict_id = v.verdict_id);
 
 -- @check an encode with fewer frames than its cut -- a leg is verified by FRAME COUNT, never exit status
+-- @fix the encode did not run to the end; read its stderr, fix the cause and re-encode the cell
 CREATE VIEW x_encode_short_of_frames AS
   SELECT e.cell_key, e.frames, k.frames AS cut_frames
     FROM encode e JOIN cell c ON c.cell_key = e.cell_key
@@ -970,24 +1006,28 @@ CREATE VIEW x_encode_short_of_frames AS
    WHERE e.frames <> k.frames;
 
 -- @check a cell whose identity settings carry no rate-control mode -- the mode is derived from what is set, never read off argv
+-- @fix plan the cell with its rate-control setting among the identity settings; a mode read off argv is not a setting
 CREATE VIEW x_cell_without_a_rate_mode AS
   SELECT c.cell_key FROM cell c
    WHERE NOT EXISTS (SELECT 1 FROM cell_setting cs JOIN setting_role sr ON sr.setting_id = cs.setting_id
                       WHERE cs.cell_key = c.cell_key AND cs.role = 'identity' AND sr.canonical_id = 'rate_control_mode');
 
 -- @check a search scored at a height that is not a served lane's panel height -- the height is a decision, never a default
+-- @fix author-search with score_height equal to a served lane's score_height
 CREATE VIEW x_search_height_not_a_lane_height AS
   SELECT s.search_id, s.score_height FROM search s
    WHERE NOT EXISTS (SELECT 1 FROM content_class_lane cl JOIN lane l ON l.lane = cl.lane
                       WHERE cl.content_class_id = s.content_class_id AND l.score_height = s.score_height);
 
 -- @check a score at a height other than its search's -- rows carrying more than one height are refused
+-- @fix score at the search's height only; the height is decided once, in author-search
 CREATE VIEW x_score_at_another_height AS
   SELECT sc.cell_key, sc.height, s.score_height FROM score sc
     JOIN cell c ON c.cell_key = sc.cell_key JOIN run r ON r.run_id = c.run_id JOIN search s ON s.search_id = r.search_id
    WHERE sc.height <> s.score_height;
 
 -- @check a reference cut in use with no content check passed or classified -- a faithful copy of a broken cut passes every sha
+-- @fix verify the reference set to a passed content check, or classify-cut with the reason, before define-class uses the cut
 CREATE VIEW x_reference_cut_unchecked AS
   SELECT k.cut_id FROM cut k JOIN content_class cc ON cc.reference_set_id = k.reference_set_id
     JOIN content_class_member m ON m.content_class_id = cc.content_class_id AND m.window_id = k.window_id
@@ -995,12 +1035,14 @@ CREATE VIEW x_reference_cut_unchecked AS
      AND NOT EXISTS (SELECT 1 FROM cut_check x WHERE x.cut_id = k.cut_id AND x.result IN ('pass','classified'));
 
 -- @check an encode-stage reference encode discarded before it was scored -- staging is removed only on a clean finish
+-- @fix keep the encode until its score record lands; staging is removed only on a clean finish
 CREATE VIEW x_discarded_without_score AS
   SELECT e.cell_key FROM encode e JOIN cell c ON c.cell_key = e.cell_key JOIN run r ON r.run_id = c.run_id
    WHERE r.stage = 'encode' AND c.cut_kind = 'reference' AND e.kept = 0
      AND NOT EXISTS (SELECT 1 FROM score s WHERE s.cell_key = e.cell_key);
 
 -- @check locate arms whose bitrate spans do not intersect on a window -- widen the locate sweep
+-- @fix widen the locate sweep on that window until every arm's bitrate span overlaps the others'
 CREATE VIEW x_arms_with_disjoint_bitrate_spans AS
   WITH spans AS (
     SELECT r.search_id, c.window_id, a.arm_id, min(e.bitrate_kbps) AS lo, max(e.bitrate_kbps) AS hi

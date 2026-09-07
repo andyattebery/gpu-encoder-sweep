@@ -24,7 +24,20 @@ class SchemaLoads(unittest.TestCase):
         self.addCleanup(conn.close)
         _, checks = mc.parse_tags()
         for v in mc.db_views(conn, "x_"):
-            self.assertTrue(checks.get(v), f"{v} has no -- @check line")
+            self.assertTrue(checks.get(v, {}).get("check"), f"{v} has no -- @check line")
+
+    def test_every_check_has_a_fix(self):
+        # every refusal is `REFUSING: <what> -- <fix>`; the fix is authored beside the check, never invented by the store
+        conn = mc.load_schema()
+        self.addCleanup(conn.close)
+        _, checks = mc.parse_tags()
+        for v in mc.db_views(conn, "x_"):
+            entry = checks.get(v)
+            self.assertIsInstance(entry, dict, f"{v}: parse_tags gives no check/fix pair")
+            self.assertTrue(entry.get("fix"), f"{v} has no -- @fix line")
+        for k, entry in mc.SCRIPT_CHECKS.items():
+            self.assertIsInstance(entry, tuple, f"{k}: SCRIPT_CHECKS gives no (refuses, fix) pair")
+            self.assertTrue(entry[1], f"{k} has no fix")
 
     def test_every_table_has_one_writer_and_one_class(self):
         tags, _ = mc.parse_tags()

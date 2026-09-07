@@ -1425,61 +1425,61 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 - every **non-empty stratum and quantile of a lane's population has a window in its class** — the
   frame is data, and a gap is a refusal rather than a footnote
 
-**Rendered from `sweep/schema.sql` — every `x_*` view and script check, with what it refuses:**
+**Rendered from `sweep/schema.sql` — every `x_*` view and script check, with what it refuses and the fix the refusal names:**
 
 <!-- BEGIN GENERATED: checks -->
-| check | refuses |
-|---|---|
-| `x_has_content_but_empty` | a lane marked has_content whose population is EMPTY (the other direction is judgement: flow membership narrows) |
-| `x_shipped_not_a_rung` | a shipped quality anchor that is not a rung on its lane's codec's ladder |
-| `x_measured_without_representation` | a `measured` value whose evidence class has NO member in the lane's population |
-| `x_measured_on_a_class_not_for_the_lane` | a `measured` value whose evidence class is not sampled for that lane |
-| `x_constant_outside_scope` | a constant applied outside its scope |
-| `x_run_outside_class` | a run that covered a window outside its declared class |
-| `x_cell_outside_run_coverage` | a cell on a window its run never declared covering |
-| `x_setting_value_outside_enum` | a cell_setting value outside the setting's enumeration |
-| `x_cell_anchor_outside_range` | a cell whose quality anchor lies outside the setting's declared range -- a target past the encoder's range is UNREACHABLE, never a cell |
-| `x_cut_chain_not_a_served_lane` | a reference cut built with the chain of a lane its class does not serve |
-| `x_member_without_reference_cut` | a class member with no reference cut in the class's reference set |
-| `x_class_serves_no_lane` | a class that serves no lane |
-| `x_shipped_without_chain` | a shipped encode step on a host with no chain for that lane -- the build order could not emit a command |
-| `x_verdict_on_unmeasured_base` | a screen verdict taken under a base the unit is not MEASURED to honour on that window |
-| `x_arm_setting_not_honoured` | an arm using a setting the unit is not MEASURED to honour on any member of the class |
-| `x_ladder_from_a_non_locate_run` | a derived ladder whose run is not a LOCATE run of the same search |
-| `x_ladder_below_floor` | an (arm, window) ladder with fewer than four rungs -- bd_rate's floor |
-| `x_viewing_on_a_discarded_encode` | a viewing verdict on an encode that was discarded, either of a pair or an acceptance's one -- scoring deletes; the viewing re-encodes and keeps |
-| `x_search_arm_roles` | a search without exactly one base arm |
-| `x_shipping_arm_not_in_search` | a shipping arm that belongs to another search |
-| `x_locate_cell_off_the_coarse_ladder` | a locate cell whose anchor value is not on the search's coarse ladder |
-| `x_incumbent_rule_without_incumbent_arm` | a search serving an incumbent-bound lane without exactly one incumbent arm |
-| `x_target_rule_without_targets` | a search serving a target-bound lane with no target |
-| `x_measured_constant_never_calibrated` | a measured constant that was never calibrated -- its value would be a typed number |
-| `x_target_without_a_viewing` | a target-bound lane's target that does not come from an acceptance viewing for that lane |
-| `x_incumbent_arm_not_viewed` | an incumbent arm that no acceptance viewing, for a lane the search serves, found acceptable |
-| `x_shipped_unit_not_on_host` | a shipped row naming a unit that is not in that host |
-| `x_supported_lane_not_routed` | a lane with content that a unit on a host supports, with a step that has neither a shipped row nor an exclusion with a reason |
-| `x_routed_and_excluded` | a lane routed to a host and excluded from it at once |
-| `x_complete_run_with_planned_cells` | a run marked complete with a cell still planned -- a completed measurement that never came home |
-| `x_run_state_disagrees_with_events` | a run whose stored state is not its latest event -- the column and its log disagree |
-| `x_two_active_runs_on_a_host` | two active runs on one host -- the box is not quiet, and pushing under a live run corrupts it |
-| `x_run_on_a_blocked_host` | a run on a host that is blocked -- refused at the moment of use, with the fix |
-| `x_run_unit_not_on_host` | a run whose unit is not in the host it ran on |
-| `x_verdict_without_cells` | a screen verdict with no encodes behind it -- a probe that did not run is not evidence |
-| `x_encode_short_of_frames` | an encode with fewer frames than its cut -- a leg is verified by FRAME COUNT, never exit status |
-| `x_cell_without_a_rate_mode` | a cell whose identity settings carry no rate-control mode -- the mode is derived from what is set, never read off argv |
-| `x_search_height_not_a_lane_height` | a search scored at a height that is not a served lane's panel height -- the height is a decision, never a default |
-| `x_score_at_another_height` | a score at a height other than its search's -- rows carrying more than one height are refused |
-| `x_reference_cut_unchecked` | a reference cut in use with no content check passed or classified -- a faithful copy of a broken cut passes every sha |
-| `x_discarded_without_score` | an encode-stage reference encode discarded before it was scored -- staging is removed only on a clean finish |
-| `x_arms_with_disjoint_bitrate_spans` | locate arms whose bitrate spans do not intersect on a window -- widen the locate sweep |
-| `strata_covered` (script) | every inventory or quantile stratum has >= min_windows members satisfying its definition, and every character stratum has >= min_windows members carrying it |
-| `measured_config_was_measured` (script) | a `measured` shipped row's identity settings equal some cell's identity settings, on the shipped unit, in the evidence class |
-| `cells_match_an_arm` (script) | every cell in a run that executes a search has identity settings equal, minus the anchor, to one of the search's arms -- exactly one base or candidate, or else the incumbent alone -- so no cell is orphaned and no two swept arms share a configuration |
-| `incumbent_viewing_matches_arm` (script) | the acceptance viewing an incumbent arm names viewed an encode whose identity settings equal the arm's plus its pinned anchor |
-| `shipping_arm_ladder_complete` (script) | the arm that ships has every rung of the codec ladder inside the anchor's range encoded on every member of the class, so any rung that ships was measured; a rung past the range is UNREACHABLE, not missing |
-| `incumbent_arm_scored` (script) | an incumbent arm is encoded at its pinned anchor on every member of the class and scored at the search's height, so the bar the incumbent rule reads was measured on this class and unit; the cell may be the base arm's |
-| `content_rate_meets_floor` (script) | content minutes per wall minute per (lane, host) at the shipped setting and worker count meets the lane's floor; a floor with no timing behind it is UNMEASURED, not unchanged |
-| `tags_complete` (script) | every table carries @group, @class and @writer; FILE means a person wrote it; one writer per table |
+| check | refuses | fix |
+|---|---|---|
+| `x_has_content_but_empty` | a lane marked has_content whose population is EMPTY (the other direction is judgement: flow membership narrows) | add-lane with input bounds a scanned title fits, or with has_content 0; an empty population is not a lane with content |
+| `x_shipped_not_a_rung` | a shipped quality anchor that is not a rung on its lane's codec's ladder | ship an anchor value that is a rung of the lane's codec ladder (add-ladder lists them); a value off the ladder was never encoded on every member |
+| `x_measured_without_representation` | a `measured` value whose evidence class has NO member in the lane's population | define-class with a member from the lane's population, or ship the value as policy with its reason |
+| `x_measured_on_a_class_not_for_the_lane` | a `measured` value whose evidence class is not sampled for that lane | name an evidence class that serves the lane (define-class lists its lanes), or ship the value as policy with its reason |
+| `x_constant_outside_scope` | a constant applied outside its scope | scope-constant the constant to the lane before a shipped setting cites it |
+| `x_run_outside_class` | a run that covered a window outside its declared class | plan the run over the class's members only; a window outside the class belongs to another run |
+| `x_cell_outside_run_coverage` | a cell on a window its run never declared covering | plan the cell's window into the run before its cells; a cell on an uncovered window has no cut to encode |
+| `x_setting_value_outside_enum` | a cell_setting value outside the setting's enumeration | use one of the setting's enumerated values (add-setting lists them); the encoder would refuse the rest |
+| `x_cell_anchor_outside_range` | a cell whose quality anchor lies outside the setting's declared range -- a target past the encoder's range is UNREACHABLE, never a cell | keep the anchor within the setting's range_lo..range_hi; report a target past the range as UNREACHABLE instead of planning a cell |
+| `x_cut_chain_not_a_served_lane` | a reference cut built with the chain of a lane its class does not serve | materialise the cut with the chain of a lane the class serves, or define-class with the chain's lane |
+| `x_member_without_reference_cut` | a class member with no reference cut in the class's reference set | materialise the class's reference set over every member before define-class names them |
+| `x_class_serves_no_lane` | a class that serves no lane | define-class with at least one lane; a class exists to give a lane its evidence |
+| `x_shipped_without_chain` | a shipped encode step on a host with no chain for that lane -- the build order could not emit a command | author-chain for the lane on that host before ship; the build order emits its command from the chain |
+| `x_verdict_on_unmeasured_base` | a screen verdict taken under a base the unit is not MEASURED to honour on that window | screen the base setting on that window first, to HONOURED; a verdict under an unhonoured base measures nothing |
+| `x_arm_setting_not_honoured` | an arm using a setting the unit is not MEASURED to honour on any member of the class | screen the setting on a member of the class to HONOURED before author-search puts it in an arm |
+| `x_ladder_from_a_non_locate_run` | a derived ladder whose run is not a LOCATE run of the same search | derive-ladders from the search's own locate run; a ladder derived from any other run is discarded |
+| `x_ladder_below_floor` | an (arm, window) ladder with fewer than four rungs -- bd_rate's floor | widen the locate sweep until every (arm, window) has four rungs; bd_rate has no meaning below that |
+| `x_viewing_on_a_discarded_encode` | a viewing verdict on an encode that was discarded, either of a pair or an acceptance's one -- scoring deletes; the viewing re-encodes and keeps | record-viewing on kept encodes only: re-encode the cell in a viewing run, which keeps its output |
+| `x_search_arm_roles` | a search without exactly one base arm | author-search with exactly one arm of role base |
+| `x_shipping_arm_not_in_search` | a shipping arm that belongs to another search | set-shipping-arm with an arm of the same search |
+| `x_locate_cell_off_the_coarse_ladder` | a locate cell whose anchor value is not on the search's coarse ladder | plan locate cells at the search's coarse rungs only (author-search lists them) |
+| `x_incumbent_rule_without_incumbent_arm` | a search serving an incumbent-bound lane without exactly one incumbent arm | author-search with exactly one incumbent arm when a served lane's decision rule is incumbent |
+| `x_target_rule_without_targets` | a search serving a target-bound lane with no target | author-search with a target for the served target-bound lane, taken from its acceptance viewing |
+| `x_measured_constant_never_calibrated` | a measured constant that was never calibrated -- its value would be a typed number | calibrate the constant from a calibrate run before a lane in its scope ships; a typed number is not a measurement |
+| `x_target_without_a_viewing` | a target-bound lane's target that does not come from an acceptance viewing for that lane | record-viewing an acceptance for the lane first, then author-search with the target naming that viewing |
+| `x_incumbent_arm_not_viewed` | an incumbent arm that no acceptance viewing, for a lane the search serves, found acceptable | record-viewing an acceptance of the incumbent's encode for a served lane, then author-search naming it as accepted_by_viewing |
+| `x_shipped_unit_not_on_host` | a shipped row naming a unit that is not in that host | add-unit the unit on that host, or ship the unit the host has |
+| `x_supported_lane_not_routed` | a lane with content that a unit on a host supports, with a step that has neither a shipped row nor an exclusion with a reason | ship the step on that host, or exclude-route the lane from it with the reason |
+| `x_routed_and_excluded` | a lane routed to a host and excluded from it at once | ship a (lane, host) or exclude-route it, never both; an excluded route is not shipped |
+| `x_complete_run_with_planned_cells` | a run marked complete with a cell still planned -- a completed measurement that never came home | every planned cell needs an encode or a failure record before the complete event; post them, or post failed |
+| `x_run_state_disagrees_with_events` | a run whose stored state is not its latest event -- the column and its log disagree | a run's state changes only through an event; post the event and the column follows |
+| `x_two_active_runs_on_a_host` | two active runs on one host -- the box is not quiet, and pushing under a live run corrupts it | wait for the host's active run to finish, or abandon it; one run per host at a time |
+| `x_run_on_a_blocked_host` | a run on a host that is blocked -- refused at the moment of use, with the fix | unblock-host once the fix it names is done, or plan the run on another host |
+| `x_run_unit_not_on_host` | a run whose unit is not in the host it ran on | plan the run on a host that has the unit (add-unit puts a unit on a host) |
+| `x_verdict_without_cells` | a screen verdict with no encodes behind it -- a probe that did not run is not evidence | the screen posts a verdict with the cells it summarises; re-run the probe |
+| `x_encode_short_of_frames` | an encode with fewer frames than its cut -- a leg is verified by FRAME COUNT, never exit status | the encode did not run to the end; read its stderr, fix the cause and re-encode the cell |
+| `x_cell_without_a_rate_mode` | a cell whose identity settings carry no rate-control mode -- the mode is derived from what is set, never read off argv | plan the cell with its rate-control setting among the identity settings; a mode read off argv is not a setting |
+| `x_search_height_not_a_lane_height` | a search scored at a height that is not a served lane's panel height -- the height is a decision, never a default | author-search with score_height equal to a served lane's score_height |
+| `x_score_at_another_height` | a score at a height other than its search's -- rows carrying more than one height are refused | score at the search's height only; the height is decided once, in author-search |
+| `x_reference_cut_unchecked` | a reference cut in use with no content check passed or classified -- a faithful copy of a broken cut passes every sha | verify the reference set to a passed content check, or classify-cut with the reason, before define-class uses the cut |
+| `x_discarded_without_score` | an encode-stage reference encode discarded before it was scored -- staging is removed only on a clean finish | keep the encode until its score record lands; staging is removed only on a clean finish |
+| `x_arms_with_disjoint_bitrate_spans` | locate arms whose bitrate spans do not intersect on a window -- widen the locate sweep | widen the locate sweep on that window until every arm's bitrate span overlaps the others' |
+| `strata_covered` (script) | every inventory or quantile stratum has >= min_windows members satisfying its definition, and every character stratum has >= min_windows members carrying it | define-class with enough members for every stratum's min_windows, or a stratum whose min_windows the population can meet; a gap is a refusal, not a footnote |
+| `measured_config_was_measured` (script) | a `measured` shipped row's identity settings equal some cell's identity settings, on the shipped unit, in the evidence class | ship identity settings a cell in the evidence class was encoded with on that unit, or ship them as policy with the reason |
+| `cells_match_an_arm` (script) | every cell in a run that executes a search has identity settings equal, minus the anchor, to one of the search's arms -- exactly one base or candidate, or else the incumbent alone -- so no cell is orphaned and no two swept arms share a configuration | plan cells from the search's arms only; two arms with one configuration are one arm |
+| `incumbent_viewing_matches_arm` (script) | the acceptance viewing an incumbent arm names viewed an encode whose identity settings equal the arm's plus its pinned anchor | author-search with the incumbent's settings and pinned anchor equal to the encode the acceptance viewing viewed |
+| `shipping_arm_ladder_complete` (script) | the arm that ships has every rung of the codec ladder inside the anchor's range encoded on every member of the class, so any rung that ships was measured; a rung past the range is UNREACHABLE, not missing | encode the shipping arm at every in-range rung on every member of the class before set-shipping-arm |
+| `incumbent_arm_scored` (script) | an incumbent arm is encoded at its pinned anchor on every member of the class and scored at the search's height, so the bar the incumbent rule reads was measured on this class and unit; the cell may be the base arm's | encode and score the incumbent at its pinned anchor on every member of the class before set-shipping-arm |
+| `content_rate_meets_floor` (script) | content minutes per wall minute per (lane, host) at the shipped setting and worker count meets the lane's floor; a floor with no timing behind it is UNMEASURED, not unchanged | time the shipped setting on that (lane, host) at that worker count; a rate under the floor ships elsewhere, or the floor changes with set-floor |
+| `tags_complete` (script) | every table carries @group, @class and @writer; FILE means a person wrote it; one writer per table | tag the table in sweep/schema.sql with @group, @class and @writer |
 
 **Enforced by the DDL itself, so no view is needed:** a score row always names its height; a timing row always names its decode path and worker count · a shipped row's (lane, step) is one of the lane's steps · `measured` needs an evidence class; `policy` needs a reason; a `classified` cut check needs a reason · a derived constant carries its inputs and its precision; a policy constant carries its value and its reason; a measured one has no typed value · an incumbent arm is pinned at its anchor; the base and the candidates are not · a score target and its height are set together or not at all; a cap that binds names its constant · one ladder per codec; a reference cut names the chain that built it.
 <!-- END GENERATED: checks -->

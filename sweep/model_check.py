@@ -45,19 +45,23 @@ def load_schema():
 
 
 def parse_tags(sql=None):
-    """{table: {group, class, writer, order}} and {x_view: description}, from the comment tags."""
+    """{table: {group, class, writer, order}} and {x_view: {check, fix}}, from the comment tags.
+
+    A `-- @check` line says what the view refuses; the `-- @fix` line beside it says what to do about
+    it. The pair is consumed by the next `CREATE VIEW x_`; a view without them gets empty strings.
+    """
     sql = sql if sql is not None else SCHEMA.read_text()
     tables, checks = OrderedDict(), OrderedDict()
     pending = {}
-    check_desc = None
+    check_pair = {}
     for line in sql.splitlines():
         m = re.match(r"^--\s*@(group|class|writer)\s+(.+?)\s*$", line)
         if m:
             pending[m.group(1)] = m.group(2)
             continue
-        m = re.match(r"^--\s*@check\s+(.+?)\s*$", line)
+        m = re.match(r"^--\s*@(check|fix)\s+(.+?)\s*$", line)
         if m:
-            check_desc = m.group(1)
+            check_pair[m.group(1)] = m.group(2)
             continue
         m = re.match(r"^CREATE TABLE (\w+)", line)
         if m:
@@ -66,8 +70,8 @@ def parse_tags(sql=None):
             continue
         m = re.match(r"^CREATE VIEW (x_\w+)", line)
         if m:
-            checks[m.group(1)] = check_desc or ""
-            check_desc = None
+            checks[m.group(1)] = {"check": check_pair.get("check", ""), "fix": check_pair.get("fix", "")}
+            check_pair = {}
     return tables, checks
 
 
@@ -442,25 +446,40 @@ def load_fixture(conn):
 
 # ---------------------------------------------------------------- checks
 
+# name -> (what it refuses, the fix); the fix is the text after ` -- ` in the store's REFUSING reply
 SCRIPT_CHECKS = OrderedDict([
-    ("strata_covered", "every inventory or quantile stratum has >= min_windows members satisfying its definition, "
-                       "and every character stratum has >= min_windows members carrying it"),
-    ("measured_config_was_measured", "a `measured` shipped row's identity settings equal some cell's identity "
-                                     "settings, on the shipped unit, in the evidence class"),
-    ("cells_match_an_arm", "every cell in a run that executes a search has identity settings equal, minus the anchor, "
-                          "to one of the search's arms -- exactly one base or candidate, or else the incumbent alone -- "
-                          "so no cell is orphaned and no two swept arms share a configuration"),
-    ("incumbent_viewing_matches_arm", "the acceptance viewing an incumbent arm names viewed an encode whose identity settings "
-                                     "equal the arm's plus its pinned anchor"),
-    ("shipping_arm_ladder_complete", "the arm that ships has every rung of the codec ladder inside the anchor's range encoded "
-                                    "on every member of the class, so any rung that ships was measured; a rung past the range "
-                                    "is UNREACHABLE, not missing"),
-    ("incumbent_arm_scored", "an incumbent arm is encoded at its pinned anchor on every member of the class and scored at the "
-                             "search's height, so the bar the incumbent rule reads was measured on this class and unit; "
-                             "the cell may be the base arm's"),
-    ("content_rate_meets_floor", "content minutes per wall minute per (lane, host) at the shipped setting and worker count "
-                                "meets the lane's floor; a floor with no timing behind it is UNMEASURED, not unchanged"),
-    ("tags_complete", "every table carries @group, @class and @writer; FILE means a person wrote it; one writer per table"),
+    ("strata_covered", ("every inventory or quantile stratum has >= min_windows members satisfying its definition, "
+                        "and every character stratum has >= min_windows members carrying it",
+                        "define-class with enough members for every stratum's min_windows, or a stratum whose "
+                        "min_windows the population can meet; a gap is a refusal, not a footnote")),
+    ("measured_config_was_measured", ("a `measured` shipped row's identity settings equal some cell's identity "
+                                      "settings, on the shipped unit, in the evidence class",
+                                      "ship identity settings a cell in the evidence class was encoded with on that unit, "
+                                      "or ship them as policy with the reason")),
+    ("cells_match_an_arm", ("every cell in a run that executes a search has identity settings equal, minus the anchor, "
+                            "to one of the search's arms -- exactly one base or candidate, or else the incumbent alone -- "
+                            "so no cell is orphaned and no two swept arms share a configuration",
+                            "plan cells from the search's arms only; two arms with one configuration are one arm")),
+    ("incumbent_viewing_matches_arm", ("the acceptance viewing an incumbent arm names viewed an encode whose identity settings "
+                                       "equal the arm's plus its pinned anchor",
+                                       "author-search with the incumbent's settings and pinned anchor equal to the encode the "
+                                       "acceptance viewing viewed")),
+    ("shipping_arm_ladder_complete", ("the arm that ships has every rung of the codec ladder inside the anchor's range encoded "
+                                      "on every member of the class, so any rung that ships was measured; a rung past the range "
+                                      "is UNREACHABLE, not missing",
+                                      "encode the shipping arm at every in-range rung on every member of the class before "
+                                      "set-shipping-arm")),
+    ("incumbent_arm_scored", ("an incumbent arm is encoded at its pinned anchor on every member of the class and scored at the "
+                              "search's height, so the bar the incumbent rule reads was measured on this class and unit; "
+                              "the cell may be the base arm's",
+                              "encode and score the incumbent at its pinned anchor on every member of the class before "
+                              "set-shipping-arm")),
+    ("content_rate_meets_floor", ("content minutes per wall minute per (lane, host) at the shipped setting and worker count "
+                                  "meets the lane's floor; a floor with no timing behind it is UNMEASURED, not unchanged",
+                                  "time the shipped setting on that (lane, host) at that worker count; a rate under the floor "
+                                  "ships elsewhere, or the floor changes with set-floor")),
+    ("tags_complete", ("every table carries @group, @class and @writer; FILE means a person wrote it; one writer per table",
+                       "tag the table in sweep/schema.sql with @group, @class and @writer")),
 ])
 
 DDL_ENFORCED = [
@@ -918,11 +937,12 @@ def render_writers(conn, tags):
 
 
 def render_checks(conn, checks):
-    rows = ["| check | refuses |", "|---|---|"]
+    rows = ["| check | refuses | fix |", "|---|---|---|"]
     for v in db_views(conn, "x_"):
-        rows.append(f"| `{v}` | {checks.get(v, '')} |")
-    for k, d in SCRIPT_CHECKS.items():
-        rows.append(f"| `{k}` (script) | {d} |")
+        c = checks.get(v, {})
+        rows.append(f"| `{v}` | {c.get('check', '')} | {c.get('fix', '')} |")
+    for k, (refuses, fix) in SCRIPT_CHECKS.items():
+        rows.append(f"| `{k}` (script) | {refuses} | {fix} |")
     rows.append("")
     rows.append("**Enforced by the DDL itself, so no view is needed:** " + " · ".join(DDL_ENFORCED) + ".")
     return "\n".join(rows)
