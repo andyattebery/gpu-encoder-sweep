@@ -69,6 +69,9 @@ VERBS = OrderedDict([
     ("set-floor", verb("/catalogue/set-floor", "lane", ("min_content_rate", F))),
     ("block-host", verb("/catalogue/block-host", "host", "fix")),
     ("unblock-host", verb("/catalogue/unblock-host", "host")),
+    ("pin-window", verb("/sample/pin-window", "window_id", "title_id", ("ss", F), ("t", F), "character", "selected_by", ("selection_score", F), "notes")),
+    ("classify-cut", verb("/sample/classify-cut", "cut_id", "check_name", "reason", "checked_at")),
+    ("define-class", verb("/sample/define-class", "content_class_id", "name", "reference_set_id", "description", ("lanes", csv), ("members", csv), ("strata", jsonarg))),
 ])
 
 
