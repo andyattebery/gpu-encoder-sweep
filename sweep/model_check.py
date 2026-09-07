@@ -804,6 +804,14 @@ MUTATIONS = [
      "x_timing_run_not_alone"),
     ("a score run on a host with no scorer", "DELETE FROM scorer WHERE host = 'media-01-score'",
      "x_score_run_host_without_scorer"),
+    ("one search scored on two hosts with no equivalence between them",
+     "INSERT INTO scorer VALUES ('eta-wsl','[\"/usr/local/bin/FFVship\"]','[\"/usr/lib/jellyfin-ffmpeg/ffmpeg\"]','libvmaf_cuda',0,'/home/sweep/cache'); INSERT INTO run (run_id, parent_run_id, encoder_unit_id, content_class_id, search_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha, scorer_build, ffvship_version, metric_backend, harness_version, started_at) VALUES ('eta-score', 'b580-qsv-av1', 'intel-b580-ihd26.2.2-qsv-av1', 'native-1080p-sdr', 'b580-qsv-av1', 'eta-wsl', 'eta-wsl', 'score', 'sweep-score@sha256:9f8e7d', '8.1.2-Jellyfin', '0b0ea2d', 'FFVship 1.3 + 8.1.2-0b0ea2d', '1.3', 'libvmaf_cuda', 'g0', '2026-09-05'); INSERT INTO score VALUES ('eta-score', 'c-a24-tng', 1548, 'ssimulacra2', 'mean', 83.0, 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d')",
+     "x_search_mixed_scorers_without_equivalence"),
+    ("one search scored on two hosts whose equivalence is not exact for ssimulacra2",
+     "INSERT INTO scorer VALUES ('eta-wsl','[\"/usr/local/bin/FFVship\"]','[\"/usr/lib/jellyfin-ffmpeg/ffmpeg\"]','libvmaf_cuda',0,'/home/sweep/cache'); INSERT INTO run (run_id, parent_run_id, encoder_unit_id, content_class_id, search_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha, scorer_build, ffvship_version, metric_backend, harness_version, started_at) VALUES ('eta-score', 'b580-qsv-av1', 'intel-b580-ihd26.2.2-qsv-av1', 'native-1080p-sdr', 'b580-qsv-av1', 'eta-wsl', 'eta-wsl', 'score', 'sweep-score@sha256:9f8e7d', '8.1.2-Jellyfin', '0b0ea2d', 'FFVship 1.3 + 8.1.2-0b0ea2d', '1.3', 'libvmaf_cuda', 'g0', '2026-09-05'); INSERT INTO score VALUES ('eta-score', 'c-a24-tng', 1548, 'ssimulacra2', 'mean', 83.0, 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d'); "
+     "INSERT INTO scorer_equivalence VALUES ('b580-qsv-av1-score', 'eta-score', 'ssimulacra2', 'mean', 1, 0.5, 0), "
+     "('b580-qsv-av1-score', 'eta-score', 'butteraugli', 'max', 1, 0.0, 1)",
+     "x_search_mixed_scorers_without_equivalence"),
     ("a run whose unit is not in its host", "UPDATE run SET host = 'eta' WHERE run_id = 'b580-qsv-av1-screen'",
      "x_run_unit_not_on_host"),
     ("a verdict with no encodes behind it", "DELETE FROM setting_verdict_cell WHERE verdict_id = 3",
@@ -876,6 +884,7 @@ DDL_REFUSALS = [
      "VALUES ('r', 'intel-b580-ihd26.2.2-qsv-av1', 'media-01-score', 'media-01-score', 'score', 'a', 'b', 's', 'g0', '2026-09-05')"),
     ("an encode run with a parent", "UPDATE run SET parent_run_id = 'b580-qsv-av1-locate' WHERE run_id = 'b580-qsv-av1'"),
     ("a scorer with an unknown backend", "INSERT INTO scorer VALUES ('eta-wsl', '[]', '[]', 'vmaf', 0, '/c')"),
+    ("an equivalence whose exactness is not a bool", "INSERT INTO scorer_equivalence VALUES ('b580-qsv-av1-score', 'b580-qsv-av1-score', 'vmaf', 'mean', 1, 0.0, 2)"),
     ("an event by nobody", "INSERT INTO run_event (run_id, at, state) VALUES ('b580-qsv-av1', '2026-09-03T03:00', 'running')"),
 ]
 
@@ -977,7 +986,7 @@ def render_writers(conn, tags):
     for t in db_tables(conn):
         by_writer.setdefault(tags[t]["writer"], []).append(t)
     order = ["inventory", "materialise", "verify", "orchestrate", "encode core", "derive ladders", "screen", "score",
-             "time", "calibrate", "ship", "viewing", "authored"]
+             "time", "equivalence", "calibrate", "ship", "viewing", "authored"]
     out = []
     for w in order + [w for w in by_writer if w not in order]:
         if w not in by_writer:

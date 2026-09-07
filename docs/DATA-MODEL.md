@@ -554,6 +554,9 @@ flag, and `cell_setting` is what it became.
     step_trace             run_id · cell_key · height
                            · scoring_step ∈ {rescale_ref, rescale_enc, ssimu2, butteraugli, libvmaf}
                            · seconds · cores_busy · gpu_mean · gpu_max                             ROW (score)
+    scorer_equivalence     run_a · run_b
+                           · metric ∈ {ssimulacra2, butteraugli, vmaf, cambi, psnr_y, float_ssim}
+                           · statistic ∈ {mean, p5, min, max} · cells · max_abs_delta · exact      ROW (equivalence)
     setting_verdict        verdict_id · encoder_unit_id · setting_id · window_id
                            · verdict ∈ {HONOURED, INERT, PARTIAL, REJECTED, BASE_FAILED, EXCLUDED}
                            · magnitude_pct · base_setting_id · base_value · noise_floor_pct
@@ -890,6 +893,8 @@ erDiagram
     cell ||--o{ timing : "cell_key"
     cell ||--o{ step_trace : "cell_key"
     run ||--o{ step_trace : "run_id"
+    run ||--o{ scorer_equivalence : "run_b"
+    run ||--o{ scorer_equivalence : "run_a"
     setting ||--o{ setting_verdict : "base_setting_id"
     window ||--o{ setting_verdict : "window_id"
     setting ||--o{ setting_verdict : "setting_id"
@@ -1002,6 +1007,15 @@ erDiagram
         REAL cores_busy
         REAL gpu_mean
         REAL gpu_max
+    }
+    scorer_equivalence {
+        TEXT run_a PK, FK
+        TEXT run_b PK, FK
+        TEXT metric PK "ssimulacra2 | butteraugli | vmaf | cambi | psnr_y | float_ssim"
+        TEXT statistic PK "mean | p5 | min | max"
+        INTEGER cells
+        REAL max_abs_delta
+        INTEGER exact
     }
     setting_verdict {
         INTEGER verdict_id PK
@@ -1175,6 +1189,8 @@ Every foreign key, child to parent:
     timing.cell_key -> cell.cell_key
     step_trace.cell_key -> cell.cell_key
     step_trace.run_id -> run.run_id
+    scorer_equivalence.run_b -> run.run_id
+    scorer_equivalence.run_a -> run.run_id
     setting_verdict.base_setting_id -> setting.setting_id
     setting_verdict.window_id -> window.window_id
     setting_verdict.setting_id -> setting.setting_id
@@ -1309,6 +1325,7 @@ each change of grain is exactly where an aggregation bug enters.
 | **derive ladders** | `(arm, window)` | locate `encode`, `cell_setting`, `search_target`, `ladder_rung` | **`arm_ladder_rung`** — carrying the locate run, never the spec |
 | **encode** | `(arm, rung, window)`, plus the incumbent arm at its pinned anchor on every member | `content_class`, `ladder`, `setting`, `cut` (reference) | `encode`, `cell_failure` — the plan was rows at launch |
 | **score** | `(score run, cell, height, metric, statistic)` — a run of its own over its parent's cells | `cell` | **`score`**, `step_trace` |
+| **equivalence** | `(score run a, score run b, metric, statistic)` | both runs' `score` rows over the same cells | **`scorer_equivalence`** — `exact` or not; a search is split across scorers only when exact |
 | **time** | `(cell, workers, repeat)` | `cut` (source) | **`timing`**, read PARTITIONED by `decode_path` |
 | **rank** | `(arm, window)` → **MEDIAN** → `(arm)` | `score`, `encode`, `cell_setting` | ⚠ **nothing** |
 | **categorise** | `(arm)` | `score`, `timing` | ⚠ **nothing** |
@@ -1351,6 +1368,7 @@ outside the ladder is `UNREACHABLE`, not a number.
     screen        ->  setting_verdict · setting_verdict_cell
     score         ->  score · step_trace
     time          ->  timing
+    equivalence   ->  scorer_equivalence
     calibrate     ->  constant_value
     ship          ->  shipped · shipped_setting · routing_exclusion
     viewing       ->  viewing_verdict
@@ -1500,6 +1518,7 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 | `x_timing_run_not_alone` | a time, split or concurrency run active on a machine with any other active run -- the box is not quiet | wait for the machine's other run to finish, or abandon it; a timing run runs alone on its machine, whichever runtime holds the other |
 | `x_run_on_a_blocked_host` | a run on a host that is blocked -- refused at the moment of use, with the fix | unblock-host once the fix it names is done, or plan the run on another host |
 | `x_score_run_host_without_scorer` | a score run on a host with no scorer row -- the plan could not say what to score with | add-scorer for the host, or score on a host that has one |
+| `x_search_mixed_scorers_without_equivalence` | a search scored on two hosts with no equivalence between them marked exact for ssimulacra2 and butteraugli -- two scorers are one instrument only once measured so | score the search on one scorer, or run equivalence between the two and split it only when exact |
 | `x_run_unit_not_on_host` | a run whose unit is not in the host it ran on -- a score run is exempt: its unit is its parent's, and its host holds the scorer | plan the run on a host that has the unit (add-unit puts a unit on a host) |
 | `x_verdict_without_cells` | a screen verdict with no encodes behind it -- a probe that did not run is not evidence | the screen posts a verdict with the cells it summarises; re-run the probe |
 | `x_encode_short_of_frames` | an encode with fewer frames than its cut -- a leg is verified by FRAME COUNT, never exit status | the encode did not run to the end; read its stderr, fix the cause and re-encode the cell |

@@ -491,6 +491,20 @@ CREATE TABLE step_trace (                                   -- how long each sco
 
 -- @group measurement
 -- @class ROW
+-- @writer equivalence
+CREATE TABLE scorer_equivalence (                           -- two score runs over the same cells, compared: exact or not, per metric and statistic
+  run_a         TEXT NOT NULL REFERENCES run,
+  run_b         TEXT NOT NULL REFERENCES run,
+  metric        TEXT NOT NULL CHECK (metric IN ('ssimulacra2','butteraugli','vmaf','cambi','psnr_y','float_ssim')),
+  statistic     TEXT NOT NULL CHECK (statistic IN ('mean','p5','min','max')),
+  cells         INTEGER NOT NULL,                           -- how many cells both runs scored
+  max_abs_delta REAL NOT NULL,
+  exact         INTEGER NOT NULL CHECK (exact IN (0,1)),    -- bit-identical across the two scorers; a search is split across scorers only when exact
+  PRIMARY KEY (run_a, run_b, metric, statistic)
+) STRICT;
+
+-- @group measurement
+-- @class ROW
 -- @writer screen
 CREATE TABLE setting_verdict (                              -- PER WINDOW; the unit-level reading is v_setting_unit_reading
   verdict_id      INTEGER PRIMARY KEY,
@@ -1020,6 +1034,18 @@ CREATE VIEW x_run_on_a_blocked_host AS
 CREATE VIEW x_score_run_host_without_scorer AS
   SELECT r.run_id, r.host FROM run r
    WHERE r.stage = 'score' AND NOT EXISTS (SELECT 1 FROM scorer s WHERE s.host = r.host);
+
+-- @check a search scored on two hosts with no equivalence between them marked exact for ssimulacra2 and butteraugli -- two scorers are one instrument only once measured so
+-- @fix score the search on one scorer, or run equivalence between the two and split it only when exact
+CREATE VIEW x_search_mixed_scorers_without_equivalence AS
+  WITH scored_on AS (SELECT DISTINCT r.search_id, r.host FROM score sc JOIN run r ON r.run_id = sc.run_id)
+  SELECT a.search_id, a.host AS scorer_a, b.host AS scorer_b, need.m AS metric
+    FROM scored_on a JOIN scored_on b ON b.search_id = a.search_id AND b.host > a.host,
+         (SELECT 'ssimulacra2' AS m UNION SELECT 'butteraugli') need
+   WHERE NOT EXISTS (SELECT 1 FROM scorer_equivalence e
+                       JOIN run ra ON ra.run_id = e.run_a JOIN run rb ON rb.run_id = e.run_b
+                      WHERE e.metric = need.m AND e.exact = 1
+                        AND ((ra.host = a.host AND rb.host = b.host) OR (ra.host = b.host AND rb.host = a.host)));
 
 -- @check a run whose unit is not in the host it ran on -- a score run is exempt: its unit is its parent's, and its host holds the scorer
 -- @fix plan the run on a host that has the unit (add-unit puts a unit on a host)
