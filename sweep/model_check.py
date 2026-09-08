@@ -203,6 +203,14 @@ INSERT INTO host_unit VALUES
 -- the scorer: one per score host, the argv and backend it scores with
 INSERT INTO scorer VALUES ('media-01-score','["/usr/local/bin/FFVship"]','["/opt/jellyfin-ffmpeg/bin/ffmpeg"]','libvmaf_cuda',0,'/mnt/data/sweep-score/cache');
 
+-- what each agent reported: the artifact it runs (the version carries the git sha) and the tools it carries; a plan pins the latest
+INSERT INTO host_identity VALUES
+ ('media-01','2026-08-20T08:00','node-encode:0.0.1.dev9+gf0','gf0','8.1.2-Jellyfin','0b0ea2d','["scale","format","hwupload","scale_cuda"]',NULL,900000000000),
+ ('media-01','2026-08-23T08:00','node-encode:0.0.2.dev0+g0','g0','8.1.2-Jellyfin','0b0ea2d','["scale","format","hwupload","scale_cuda"]',NULL,850000000000),
+ ('media-01-score','2026-08-23T08:00','node-score:0.0.2.dev0+g0','g0','8.1.2-Jellyfin','0b0ea2d','["scale","format","hwupload_cuda","libvmaf","libvmaf_cuda"]','1.3',400000000000),
+ ('eta','2026-08-23T08:05','uvx:0.0.2.dev0+g0','g0','8.1.2-Jellyfin','0b0ea2d','["scale","format","hwupload","scale_cuda"]',NULL,1200000000000),
+ ('eta-wsl','2026-08-23T08:05','node-score:0.0.2.dev0+g0','g0','8.1.2-Jellyfin','0b0ea2d','["scale","format","hwupload_cuda","libvmaf","libvmaf_cuda"]','1.3',300000000000);
+
 INSERT INTO canonical_concept VALUES
  ('quality_anchor','a position on the codec ladder: -qp, -cq, -global_quality, -q:v'),
  ('rate_control_mode','constant-quantiser versus rate-targeted: -rc constqp, -rc_mode CQP, qsv -q:v'),
@@ -351,19 +359,19 @@ INSERT INTO search_target VALUES ('b580-qsv-av1','ssimulacra2','mean',75,NULL),(
 -- every run names the artifact its plan was built for; the fixture's is one image digest
 INSERT INTO run (run_id, encoder_unit_id, content_class_id, search_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha,
                  scorer_build, ffvship_version, metric_backend, harness_version, started_at, finished_at) VALUES
- ('b580-inventory',NULL,NULL,NULL,'media-01','media-01','inventory','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-24T09:00','2026-08-24T09:20'),
- ('b580-materialise','intel-b580-ihd26.2.2-qsv-av1',NULL,NULL,'media-01','media-01-b580','materialise','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-25T09:00','2026-08-25T11:00'),
- ('b580-verify',NULL,NULL,NULL,'media-01','media-01','verify','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-26T09:00','2026-08-26T09:30'),
- ('b580-qsv-av1','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','encode','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-02T10:00','2026-09-03T02:00'),
- ('b580-qsv-av1-time','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','time','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-03T10:00','2026-09-03T12:00'),
- ('b580-qsv-av1-screen','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr',NULL,'media-01','media-01-b580','screen','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-01T10:00','2026-09-01T11:03'),
- ('b580-qsv-av1-locate','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','locate','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-02T00:00','2026-09-02T00:40'),
- ('b580-viewing','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr',NULL,'media-01','media-01-b580','viewing','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-04T10:00','2026-09-04T10:10'),
- ('m4-calibrate','nvidia-a4000-595-nvenc-hevc',NULL,NULL,'media-01','media-01','calibrate','sweep-node@sha256:0a1b2c','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-28T10:00','2026-08-28T14:00');
+ ('b580-inventory',NULL,NULL,NULL,'media-01','media-01','inventory','node-encode:0.0.2.dev0+g0','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-24T09:00','2026-08-24T09:20'),
+ ('b580-materialise','intel-b580-ihd26.2.2-qsv-av1',NULL,NULL,'media-01','media-01-b580','materialise','node-encode:0.0.2.dev0+g0','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-25T09:00','2026-08-25T11:00'),
+ ('b580-verify',NULL,NULL,NULL,'media-01','media-01','verify','node-encode:0.0.2.dev0+g0','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-26T09:00','2026-08-26T09:30'),
+ ('b580-qsv-av1','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','encode','node-encode:0.0.2.dev0+g0','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-02T10:00','2026-09-03T02:00'),
+ ('b580-qsv-av1-time','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','time','node-encode:0.0.2.dev0+g0','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-03T10:00','2026-09-03T12:00'),
+ ('b580-qsv-av1-screen','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr',NULL,'media-01','media-01-b580','screen','node-encode:0.0.2.dev0+g0','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-01T10:00','2026-09-01T11:03'),
+ ('b580-qsv-av1-locate','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01','media-01-b580','locate','node-encode:0.0.2.dev0+g0','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-02T00:00','2026-09-02T00:40'),
+ ('b580-viewing','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr',NULL,'media-01','media-01-b580','viewing','node-encode:0.0.2.dev0+g0','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-09-04T10:00','2026-09-04T10:10'),
+ ('m4-calibrate','nvidia-a4000-595-nvenc-hevc',NULL,NULL,'media-01','media-01','calibrate','node-encode:0.0.2.dev0+g0','8.1.2-Jellyfin','0b0ea2d',NULL,NULL,NULL,'g0','2026-08-28T10:00','2026-08-28T14:00');
 -- scoring is a run of its own: on the score container of the same machine, over the encode run's cells, with the scorer's identity
 INSERT INTO run (run_id, parent_run_id, encoder_unit_id, content_class_id, search_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha,
                  scorer_build, ffvship_version, metric_backend, harness_version, started_at, finished_at) VALUES
- ('b580-qsv-av1-score','b580-qsv-av1','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01-score','media-01-score','score','sweep-score@sha256:9f8e7d','8.1.2-Jellyfin','0b0ea2d','FFVship 1.3 + 8.1.2-0b0ea2d','1.3','libvmaf_cuda','g0','2026-09-03T02:30','2026-09-03T06:00');
+ ('b580-qsv-av1-score','b580-qsv-av1','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01-score','media-01-score','score','node-score:0.0.2.dev0+g0','8.1.2-Jellyfin','0b0ea2d','FFVship 1.3 + 8.1.2-0b0ea2d','1.3','libvmaf_cuda','g0','2026-09-03T02:30','2026-09-03T06:00');
 -- HEADROOM 0.98 is the fixture's stand-in: the incumbent request factor, which overshoots and is unmeasured
 INSERT INTO constant_value VALUES
  ('HEADROOM','m4-calibrate',0.98,'2026-08-28'),('BOUND','m4-calibrate',20,'2026-08-28'),
@@ -734,6 +742,8 @@ def run_checks(conn, tags):
 # ---------------------------------------------------------------- negative cases: each must be CAUGHT
 
 MUTATIONS = [
+    ("a run for an artifact its host never reported", "UPDATE run SET artifact = 'node-encode:0.0.2.dev0+gffffff' WHERE run_id = 'b580-qsv-av1'",
+     "x_run_artifact_not_reported"),
     ("a shipped anchor off the ladder", "UPDATE shipped_setting SET value = '31' WHERE shipped_id = 1 AND setting_id = 'qsv.q'",
      "x_shipped_not_a_rung"),
     ("a measured value on content outside the lane",
@@ -850,10 +860,10 @@ MUTATIONS = [
     ("a score run on a host with no scorer", "DELETE FROM scorer WHERE host = 'media-01-score'",
      "x_score_run_host_without_scorer"),
     ("one search scored on two hosts with no equivalence between them",
-     "INSERT INTO scorer VALUES ('eta-wsl','[\"/usr/local/bin/FFVship\"]','[\"/usr/lib/jellyfin-ffmpeg/ffmpeg\"]','libvmaf_cuda',0,'/home/sweep/cache'); INSERT INTO run (run_id, parent_run_id, encoder_unit_id, content_class_id, search_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha, scorer_build, ffvship_version, metric_backend, harness_version, started_at) VALUES ('eta-score', 'b580-qsv-av1', 'intel-b580-ihd26.2.2-qsv-av1', 'native-1080p-sdr', 'b580-qsv-av1', 'eta-wsl', 'eta-wsl', 'score', 'sweep-score@sha256:9f8e7d', '8.1.2-Jellyfin', '0b0ea2d', 'FFVship 1.3 + 8.1.2-0b0ea2d', '1.3', 'libvmaf_cuda', 'g0', '2026-09-05'); INSERT INTO score VALUES ('eta-score', 'c-a24-tng', 1548, 'ssimulacra2', 'mean', 83.0, 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d')",
+     "INSERT INTO scorer VALUES ('eta-wsl','[\"/usr/local/bin/FFVship\"]','[\"/usr/lib/jellyfin-ffmpeg/ffmpeg\"]','libvmaf_cuda',0,'/home/sweep/cache'); INSERT INTO run (run_id, parent_run_id, encoder_unit_id, content_class_id, search_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha, scorer_build, ffvship_version, metric_backend, harness_version, started_at) VALUES ('eta-score', 'b580-qsv-av1', 'intel-b580-ihd26.2.2-qsv-av1', 'native-1080p-sdr', 'b580-qsv-av1', 'eta-wsl', 'eta-wsl', 'score', 'node-score:0.0.2.dev0+g0', '8.1.2-Jellyfin', '0b0ea2d', 'FFVship 1.3 + 8.1.2-0b0ea2d', '1.3', 'libvmaf_cuda', 'g0', '2026-09-05'); INSERT INTO score VALUES ('eta-score', 'c-a24-tng', 1548, 'ssimulacra2', 'mean', 83.0, 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d')",
      "x_search_mixed_scorers_without_equivalence"),
     ("one search scored on two hosts whose equivalence is not exact for ssimulacra2",
-     "INSERT INTO scorer VALUES ('eta-wsl','[\"/usr/local/bin/FFVship\"]','[\"/usr/lib/jellyfin-ffmpeg/ffmpeg\"]','libvmaf_cuda',0,'/home/sweep/cache'); INSERT INTO run (run_id, parent_run_id, encoder_unit_id, content_class_id, search_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha, scorer_build, ffvship_version, metric_backend, harness_version, started_at) VALUES ('eta-score', 'b580-qsv-av1', 'intel-b580-ihd26.2.2-qsv-av1', 'native-1080p-sdr', 'b580-qsv-av1', 'eta-wsl', 'eta-wsl', 'score', 'sweep-score@sha256:9f8e7d', '8.1.2-Jellyfin', '0b0ea2d', 'FFVship 1.3 + 8.1.2-0b0ea2d', '1.3', 'libvmaf_cuda', 'g0', '2026-09-05'); INSERT INTO score VALUES ('eta-score', 'c-a24-tng', 1548, 'ssimulacra2', 'mean', 83.0, 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d'); "
+     "INSERT INTO scorer VALUES ('eta-wsl','[\"/usr/local/bin/FFVship\"]','[\"/usr/lib/jellyfin-ffmpeg/ffmpeg\"]','libvmaf_cuda',0,'/home/sweep/cache'); INSERT INTO run (run_id, parent_run_id, encoder_unit_id, content_class_id, search_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha, scorer_build, ffvship_version, metric_backend, harness_version, started_at) VALUES ('eta-score', 'b580-qsv-av1', 'intel-b580-ihd26.2.2-qsv-av1', 'native-1080p-sdr', 'b580-qsv-av1', 'eta-wsl', 'eta-wsl', 'score', 'node-score:0.0.2.dev0+g0', '8.1.2-Jellyfin', '0b0ea2d', 'FFVship 1.3 + 8.1.2-0b0ea2d', '1.3', 'libvmaf_cuda', 'g0', '2026-09-05'); INSERT INTO score VALUES ('eta-score', 'c-a24-tng', 1548, 'ssimulacra2', 'mean', 83.0, 'S1', 'FFVship 1.3 + 8.1.2-0b0ea2d'); "
      "INSERT INTO scorer_equivalence VALUES ('b580-qsv-av1-score', 'eta-score', 'ssimulacra2', 'mean', 1, 0.5, 0), "
      "('b580-qsv-av1-score', 'eta-score', 'butteraugli', 'max', 1, 0.0, 1)",
      "x_search_mixed_scorers_without_equivalence"),
@@ -944,6 +954,7 @@ DDL_REFUSALS = [
     ("a timing sample with no frame count",
      "INSERT INTO timing (cell_key, workers, repeat_index, fps, wall_s, decode_path, is_warmup) VALUES ('t-tng', 1, 5, 600.0, 2.4, 'hardware', 0)"),
     ("an event by nobody", "INSERT INTO run_event (run_id, at, state) VALUES ('b580-qsv-av1', '2026-09-03T03:00', 'running')"),
+    ("an identity with no artifact", "INSERT INTO host_identity VALUES ('eta', '2026-09-06T08:00', NULL, 'g1', '8.1.2-Jellyfin', '0b0ea2d', '[]', NULL, 1)"),
 ]
 
 
@@ -1043,7 +1054,7 @@ def render_writers(conn, tags):
     by_writer = OrderedDict()
     for t in db_tables(conn):
         by_writer.setdefault(tags[t]["writer"], []).append(t)
-    order = ["inventory", "materialise", "verify", "orchestrate", "encode core", "derive ladders", "screen", "score",
+    order = ["inventory", "materialise", "verify", "orchestrate", "agent", "encode core", "derive ladders", "screen", "score",
              "time", "equivalence", "calibrate", "ship", "viewing", "authored"]
     out = []
     for w in order + [w for w in by_writer if w not in order]:

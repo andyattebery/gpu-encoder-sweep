@@ -27,6 +27,10 @@ def replay(store):
             status, text = post(client, path, body)
             if status != 200:
                 raise AssertionError(f"{path} {body.get('lane', body.get('host', ''))}: {text}")
+        elif kind == "identity":
+            _, row = step
+            with store.transaction() as conn:
+                st.insert(conn, "host_identity", row)
         elif kind == "run":
             _, plan, started, finished, records = step
             with store.transaction() as conn:

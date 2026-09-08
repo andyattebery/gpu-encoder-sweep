@@ -40,6 +40,7 @@ class Export(unittest.TestCase):
         files = self.render()
         self.assertIn("authored/host.json", files)
         self.assertIn("sample/cut.json", files)
+        self.assertIn("agents/host_identity.json", files)
         self.assertIn("runs/b580-qsv-av1/plan.json", files)
         self.assertIn("runs/b580-qsv-av1/events.jsonl", files)
         self.assertIn("runs/b580-qsv-av1/records/encode.json", files)

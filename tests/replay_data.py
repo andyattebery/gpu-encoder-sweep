@@ -4,18 +4,27 @@ order the campaign would: what tests/test_hub_replay.py drives through the API. 
 Every value here mirrors the fixture's SQL; the equality test on the authored tables is what keeps the two agreeing.
 Cells that the fixture generates with SELECTs are generated here with the same comprehensions.
 """
+import json
+
 from sweep.hub.store import CellPlan, RunPlan
 
 B580, A4000, TI5060 = "intel-b580-ihd26.2.2-qsv-av1", "nvidia-a4000-595-nvenc-hevc", "nvidia-5060ti-595-nvenc-av1"
 CLASS, SEARCH, LANE = "native-1080p-sdr", "b580-qsv-av1", "m4-ipad-le1080p-sdr"
 MEMBERS = ["mrrobot", "parks", "shield", "snowpiercer", "tng", "tos"]
 WINDOWS = MEMBERS + ["sopranos"]
-NODE = dict(artifact="sweep-node@sha256:0a1b2c", ffmpeg_build="8.1.2-Jellyfin", ffmpeg_sha="0b0ea2d", harness_version="g0")
-SCORER = dict(artifact="sweep-score@sha256:9f8e7d", ffmpeg_build="8.1.2-Jellyfin", ffmpeg_sha="0b0ea2d", harness_version="g0",
+NODE = dict(artifact="node-encode:0.0.2.dev0+g0", ffmpeg_build="8.1.2-Jellyfin", ffmpeg_sha="0b0ea2d", harness_version="g0")
+SCORER = dict(artifact="node-score:0.0.2.dev0+g0", ffmpeg_build="8.1.2-Jellyfin", ffmpeg_sha="0b0ea2d", harness_version="g0",
               scorer_build="FFVship 1.3 + 8.1.2-0b0ea2d", ffvship_version="1.3", metric_backend="libvmaf_cuda")
 HEVC_RUNGS = [4, 6, 8, 10, 11, 14, 15, 16, 17, 18, 20, 22, 26, 28, 30, 32, 34, 36, 38, 42, 46]
 AV1_RUNGS = [15, 20, 22, 24, 25, 26, 28, 30, 34, 35, 40, 45, 50, 55, 60]
 IN_RANGE = [r for r in AV1_RUNGS if 1 <= r <= 51]        # qsv.q ends at 51: 55 and 60 are UNREACHABLE
+
+
+def identity(host, artifact, ffvship_version=None, filters=("scale", "format", "hwupload", "scale_cuda"), reported_at="2026-08-23T08:00"):
+    """What the host's agent reported before its first plan: the store refuses a run for an artifact nobody reported."""
+    return ("identity", dict(host=host, reported_at=reported_at, artifact=artifact, harness_version="g0", ffmpeg_build="8.1.2-Jellyfin",
+                             ffmpeg_sha="0b0ea2d", ffmpeg_filters=json.dumps(list(filters), separators=(",", ":")),
+                             ffvship_version=ffvship_version, free_bytes=850000000000))
 
 
 def verb(path, body):
@@ -295,6 +304,10 @@ def steps():
     out += [verb("/catalogue/add-unit", u) for u in UNITS]
     out += [verb("/catalogue/add-concept", dict(canonical_id=c, description=d)) for c, d in CONCEPTS]
     out += [verb("/catalogue/add-setting", s) for s in SETTINGS]
+    # the agents report themselves before anything is planned for them
+    out.append(identity("media-01", NODE["artifact"]))
+    out.append(identity("media-01-score", SCORER["artifact"], ffvship_version="1.3",
+                        filters=("scale", "format", "hwupload_cuda", "libvmaf", "libvmaf_cuda")))
     out.append(run(plan("b580-inventory", "inventory", "media-01", "media-01", unit=None, cc=None, search=None, started_at="2026-08-24T09:00", **NODE),
                    "2026-08-24T09:00", "2026-08-24T09:20", TITLES))
     out += [verb("/catalogue/add-constant", c) for c in CONSTANTS]

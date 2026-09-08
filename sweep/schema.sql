@@ -639,6 +639,22 @@ CREATE TABLE constant_value (                               -- a measured consta
   PRIMARY KEY (name, run_id)
 ) STRICT;
 
+-- @group measurement
+-- @class ROW
+-- @writer agent
+CREATE TABLE host_identity (                                -- what the agent on a host reported: the artifact it runs and the tools it carries; a plan pins the latest
+  host            TEXT NOT NULL REFERENCES host,
+  reported_at     TEXT NOT NULL,
+  artifact        TEXT NOT NULL,                            -- node-encode:<version> | node-score:<version> | uvx:<version>; the version carries the git sha
+  harness_version TEXT NOT NULL,                            -- the git sha, or the tag when the version is a clean tag
+  ffmpeg_build    TEXT NOT NULL,                            -- the -version string: 8.1.2-Jellyfin
+  ffmpeg_sha      TEXT NOT NULL,                            -- sha256 of the binary, computed where it runs
+  ffmpeg_filters  TEXT NOT NULL,                            -- compact JSON list of filter names; the score planner reads it for the backend's filter
+  ffvship_version TEXT,                                     -- NULL on a host with no FFVship
+  free_bytes      INTEGER NOT NULL,                         -- under the work root, at the report
+  PRIMARY KEY (host, reported_at)
+) STRICT;
+
 -- ============================================================================ DECISION
 
 -- @group decision
@@ -781,6 +797,11 @@ CREATE VIEW v_run_progress AS
          sum(cs.state = 'failed') AS failed
     FROM run r LEFT JOIN v_cell_state cs ON cs.run_id = coalesce(r.parent_run_id, r.run_id)
    GROUP BY r.run_id;
+
+-- the identity a host's agent last reported: what a plan pins, and what a claim is compared against
+CREATE VIEW v_host_identity_current AS
+  SELECT i.* FROM host_identity i
+   WHERE i.reported_at = (SELECT max(reported_at) FROM host_identity j WHERE j.host = i.host);
 
 -- ============================================================================ CHECKS (x_*): each must return ZERO rows
 
@@ -1186,3 +1207,10 @@ CREATE VIEW x_arms_with_disjoint_bitrate_spans AS
      GROUP BY r.search_id, c.window_id, a.arm_id)
   SELECT search_id, window_id, max(lo) AS highest_floor, min(hi) AS lowest_ceiling FROM spans
    GROUP BY search_id, window_id HAVING count(*) > 1 AND max(lo) > min(hi);
+
+-- @check a run whose artifact and harness version its host never reported -- a plan is built for the code the node runs
+-- @fix start the agent on that host so it reports its identity, then plan the run again; a plan is never built for an artifact nobody reported
+CREATE VIEW x_run_artifact_not_reported AS
+  SELECT r.run_id, r.host, r.artifact FROM run r
+   WHERE NOT EXISTS (SELECT 1 FROM host_identity i WHERE i.host = r.host
+                      AND i.artifact = r.artifact AND i.harness_version = r.harness_version);

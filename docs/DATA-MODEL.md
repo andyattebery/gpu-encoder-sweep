@@ -577,6 +577,8 @@ flag, and `cell_setting` is what it became.
                            · statistic ∈ {mean, p5, min, max} · target · viewing_id                FILE
     arm_ladder_rung        run_id · arm_id · window_id · rung                                      ROW (derive ladders)
     constant_value         name · run_id · value · computed_at                                     ROW (calibrate)
+    host_identity          host · reported_at · artifact · harness_version · ffmpeg_build
+                           · ffmpeg_sha · ffmpeg_filters · ffvship_version · free_bytes            ROW (agent)
 <!-- END GENERATED: schema:measurement -->
 
 ⚠⚠ **A RUN IS ROWS BEFORE IT RUNS.** The orchestrator writes `run`, `run_window`, `cell` and
@@ -927,6 +929,7 @@ erDiagram
     run ||--o{ arm_ladder_rung : "run_id"
     run ||--o{ constant_value : "run_id"
     constant ||--o{ constant_value : "name"
+    host ||--o{ host_identity : "host"
     run {
         TEXT run_id PK
         TEXT encoder_unit_id FK
@@ -1104,6 +1107,17 @@ erDiagram
         REAL value
         TEXT computed_at
     }
+    host_identity {
+        TEXT host PK, FK
+        TEXT reported_at PK
+        TEXT artifact
+        TEXT harness_version
+        TEXT ffmpeg_build
+        TEXT ffmpeg_sha
+        TEXT ffmpeg_filters
+        TEXT ffvship_version
+        INTEGER free_bytes
+    }
 ```
 
 **decision**
@@ -1245,6 +1259,7 @@ Every foreign key, child to parent:
     arm_ladder_rung.run_id -> run.run_id
     constant_value.run_id -> run.run_id
     constant_value.name -> constant.name
+    host_identity.host -> host.host
     shipped.lane,step -> lane_step.lane,step
     shipped.content_class_id -> content_class.content_class_id
     shipped.encoder_unit_id -> encoder_unit.encoder_unit_id
@@ -1395,6 +1410,7 @@ outside the ladder is `UNREACHABLE`, not a number.
     materialise   ->  reference_set · cut
     verify        ->  cut_check
     orchestrate   ->  run · run_event · run_window · cell · cell_setting
+    agent         ->  host_identity
     encode core   ->  encode · cell_failure
     derive ladders ->  arm_ladder_rung
     screen        ->  setting_verdict · setting_verdict_cell · admissibility_verdict
@@ -1565,6 +1581,7 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 | `x_reference_cut_unchecked` | a reference cut in use with no content check passed or classified -- a faithful copy of a broken cut passes every sha | verify the reference set to a passed content check, or classify-cut with the reason, before define-class uses the cut |
 | `x_discarded_without_score` | an encode-stage reference encode discarded before it was scored -- staging is removed only on a clean finish | keep the encode until its score record lands; staging is removed only on a clean finish |
 | `x_arms_with_disjoint_bitrate_spans` | locate arms whose bitrate spans do not intersect on a window -- widen the locate sweep | widen the locate sweep on that window until every arm's bitrate span overlaps the others' |
+| `x_run_artifact_not_reported` | a run whose artifact and harness version its host never reported -- a plan is built for the code the node runs | start the agent on that host so it reports its identity, then plan the run again; a plan is never built for an artifact nobody reported |
 | `strata_covered` (script) | every inventory or quantile stratum has >= min_windows members satisfying its definition, and every character stratum has >= min_windows members carrying it | define-class with enough members for every stratum's min_windows, or a stratum whose min_windows the population can meet; a gap is a refusal, not a footnote |
 | `measured_config_was_measured` (script) | a `measured` shipped row's identity settings equal some cell's identity settings, on the shipped unit, in the evidence class | ship identity settings a cell in the evidence class was encoded with on that unit, or ship them as policy with the reason |
 | `cells_match_an_arm` (script) | every cell in a run that executes a search has identity settings equal, minus the anchor, to one of the search's arms -- exactly one base or candidate, or else the incumbent alone -- so no cell is orphaned and no two swept arms share a configuration | plan cells from the search's arms only; two arms with one configuration are one arm |

@@ -12,7 +12,8 @@ from sweep.hub.refusals import Refusal
 from tests.hub_helpers import fixture_store
 
 B580 = "intel-b580-ihd26.2.2-qsv-av1"
-NODE = dict(artifact="sweep-node@sha256:0a1b2c", ffmpeg_build="8.1.2-Jellyfin", ffmpeg_sha="0b0ea2d", harness_version="g0", planned_at="2026-09-05T09:00")
+NODE = dict(artifact="node-encode:0.0.2.dev0+g0", ffmpeg_build="8.1.2-Jellyfin", ffmpeg_sha="0b0ea2d", harness_version="g0", planned_at="2026-09-05T09:00")
+SCORER = dict(NODE, artifact="node-score:0.0.2.dev0+g0")     # the pair media-01-score reported; a run names what its host reported
 ARM_A = (("qsv.preset", "4", "identity"), ("qsv.b_strategy", "0", "identity"), ("qsv.q", "24", "identity"))
 ENCODE = {"kind": "encode", "cell_key": "c-new", "bytes": 60000000, "bitrate_kbps": 8000.0, "frames": 1439, "duration_s": 60.0,
           "decode_path": "hardware", "kept": True}
@@ -26,9 +27,9 @@ class Ingest(unittest.TestCase):
     def rows(self, table, **key):
         return [r for r in self.store.rows(table) if all(r[k] == v for k, v in key.items())]
 
-    def plan(self, run_id, stage, host="media-01", unit=B580, cc="native-1080p-sdr", search="b580-qsv-av1", windows=("tng",), cells=(), **more):
+    def plan(self, run_id, stage, host="media-01", unit=B580, cc="native-1080p-sdr", search="b580-qsv-av1", windows=("tng",), cells=(), pins=NODE, **more):
         plan = store.RunPlan(run_id=run_id, stage=stage, host=host, node_label=host, encoder_unit_id=unit, content_class_id=cc,
-                             search_id=search, windows=windows, cells=cells, **NODE, **more)
+                             search_id=search, windows=windows, cells=cells, **pins, **more)
         with self.store.transaction() as conn:
             store.plan_run(conn, plan)
 
@@ -85,7 +86,7 @@ class Ingest(unittest.TestCase):
     def score_run(self):
         self.encode_run()
         self.post("r2", ENCODE)
-        self.plan("r2-score", "score", host="media-01-score", unit=None, cc=None, search=None, windows=(), parent_run_id="r2",
+        self.plan("r2-score", "score", host="media-01-score", pins=SCORER, unit=None, cc=None, search=None, windows=(), parent_run_id="r2",
                   scorer_build="FFVship 1.3 + 8.1.2-0b0ea2d", ffvship_version="1.3", metric_backend="libvmaf_cuda")
 
     def test_score_record_reaches_score_and_step_trace_under_the_score_run(self):
@@ -109,7 +110,7 @@ class Ingest(unittest.TestCase):
     def test_score_run_without_a_search_is_refused(self):
         self.plan("r2-screen", "screen", search=None, cells=(store.CellPlan("s2-a", "tng", "reference", (("qsv.preset", "1", "identity"), ("qsv.q", "30", "identity"))),))
         self.post("r2-screen", dict(ENCODE, cell_key="s2-a", kept=False))
-        self.plan("r2-screen-score", "score", host="media-01-score", unit=None, cc=None, search=None, windows=(), parent_run_id="r2-screen",
+        self.plan("r2-screen-score", "score", host="media-01-score", pins=SCORER, unit=None, cc=None, search=None, windows=(), parent_run_id="r2-screen",
                   scorer_build="b", ffvship_version="1.3", metric_backend="libvmaf_cuda")
         self.refused("r2-screen-score", dict(self.SCORE, cell_key="s2-a"),
                      "REFUSING: score run 'r2-screen-score' has no search to take the height from -- score runs are planned from a search's encoding run; the height is the search's")

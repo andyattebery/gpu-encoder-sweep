@@ -193,7 +193,7 @@ class PlansEventsAndCalibration(unittest.TestCase):
 
     def encode_plan(self):
         return store.RunPlan(run_id="r2", stage="encode", host="media-01", node_label="media-01-b580",
-                             artifact="sweep-node@sha256:0a1b2c", ffmpeg_build="8.1.2-Jellyfin", ffmpeg_sha="0b0ea2d",
+                             artifact="node-encode:0.0.2.dev0+g0", ffmpeg_build="8.1.2-Jellyfin", ffmpeg_sha="0b0ea2d",
                              harness_version="g0", planned_at="2026-09-05T09:00",
                              encoder_unit_id="intel-b580-ihd26.2.2-qsv-av1", content_class_id="native-1080p-sdr",
                              search_id="b580-qsv-av1", windows=("tng",),
@@ -215,7 +215,7 @@ class PlansEventsAndCalibration(unittest.TestCase):
 
     def test_plan_run_of_a_score_run_copies_the_parent(self):
         plan = store.RunPlan(run_id="r-score", stage="score", host="media-01-score", node_label="media-01-score",
-                             artifact="sweep-score@sha256:9f8e7d", ffmpeg_build="8.1.2-Jellyfin", ffmpeg_sha="0b0ea2d",
+                             artifact="node-score:0.0.2.dev0+g0", ffmpeg_build="8.1.2-Jellyfin", ffmpeg_sha="0b0ea2d",
                              harness_version="g0", planned_at="2026-09-05T09:00", parent_run_id="b580-qsv-av1",
                              scorer_build="FFVship 1.3 + 8.1.2-0b0ea2d", ffvship_version="1.3", metric_backend="libvmaf_cuda")
         with self.store.transaction() as conn:
@@ -250,7 +250,7 @@ class PlansEventsAndCalibration(unittest.TestCase):
 
     def test_calibrate_writes_constant_value(self):
         plan = store.RunPlan(run_id="m4-calibrate-2", stage="calibrate", host="media-01", node_label="media-01",
-                             artifact="sweep-node@sha256:0a1b2c", ffmpeg_build="8.1.2-Jellyfin", ffmpeg_sha="0b0ea2d",
+                             artifact="node-encode:0.0.2.dev0+g0", ffmpeg_build="8.1.2-Jellyfin", ffmpeg_sha="0b0ea2d",
                              harness_version="g0", planned_at="2026-09-05T09:00", encoder_unit_id="nvidia-a4000-595-nvenc-hevc")
         with self.store.transaction() as conn:
             store.plan_run(conn, plan)

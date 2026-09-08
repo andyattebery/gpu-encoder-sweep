@@ -1,8 +1,8 @@
 """sweep/hub/export.py -- the record as files, so a change is a diff someone reviews.
 
-Every table has a home: FILE tables under authored/, the sample's ROW tables under sample/, a run's plan, events
-and records under runs/<run_id>/, the calibrated constants in constants.json, and the API's own description in
-openapi.json. Rows are in primary-key order and keys are sorted, so the same store renders the same bytes and a
+Every table has a home: FILE tables under authored/, the sample's ROW tables under sample/, what the agents
+reported outside any run under agents/, a run's plan, events and records under runs/<run_id>/, the calibrated
+constants in constants.json, and the API's own description in openapi.json. Rows are in primary-key order and keys are sorted, so the same store renders the same bytes and a
 changed row changes one file. `write` removes what it wrote last time and nothing else. Stdlib only.
 """
 import json
@@ -26,8 +26,10 @@ EXPORT_HOMES = {
     "setting_verdict_cell": ("nested", None), "admissibility_verdict_cell": ("nested", None),
     "scorer_equivalence": ("record", "run_a"),
     "constant_value": ("constants", None),
+    # what the agents reported outside any run: identities (and, from M2, publishes)
+    "host_identity": ("agents", None),
 }
-MANAGED = ("authored", "sample", "runs", "constants.json", "openapi.json")
+MANAGED = ("authored", "sample", "agents", "runs", "constants.json", "openapi.json")
 
 
 def dumps(obj):
@@ -79,7 +81,7 @@ def render(conn, openapi):
     tables = mc.db_tables(conn)
     for t in tables:
         home, how = EXPORT_HOMES[t]
-        if home in ("authored", "sample"):
+        if home in ("authored", "sample", "agents"):
             files[f"{home}/{t}.json"] = dumps(rows(conn, t))
     cell_runs = _run_of_cell(conn)
     windows, cells, settings = {}, {}, {}
