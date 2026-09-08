@@ -1,0 +1,17 @@
+#!/usr/bin/env python3
+"""A fake ffprobe: one video stream, one audio, one subtitle, and the format, shaped like ffprobe -of json."""
+import json
+import os
+import sys
+
+transfer = os.environ.get("FAKE_TRANSFER", "bt709")
+print(json.dumps({
+    "streams": [
+        {"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080, "pix_fmt": "yuv420p", "r_frame_rate": "24000/1001",
+         "field_order": "progressive", "color_transfer": transfer, "bits_per_raw_sample": "8",
+         "side_data_list": ([{"side_data_type": "DOVI configuration record", "dv_profile": 8}] if os.environ.get("FAKE_DV") else [])},
+        {"codec_type": "audio", "codec_name": "eac3", "channel_layout": "5.1"},
+        {"codec_type": "subtitle", "codec_name": "subrip", "tags": {"language": "eng"}},
+    ],
+    "format": {"bit_rate": "18500000", "duration": "5400.5"},
+}))

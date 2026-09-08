@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""A fake ffmpeg for the agent's tests: it answers -version and -filters, writes a -progress file that reaches progress=end,
+writes an output file of a deterministic size, prints framemd5 rows, answers the decode probe from FAKE_PROBE, copies
+for the rescale and writes a libvmaf log. Nothing here encodes anything. Knobs: FAKE_FRAMES (default 1439), FAKE_PROBE
+(text put on stderr by the probe), FAKE_FILTERS (comma list), FAKE_RC (exit status for an encode)."""
+import hashlib
+import json
+import os
+import re
+import sys
+
+argv = sys.argv[1:]
+frames = int(os.environ.get("FAKE_FRAMES", "1439"))
+
+
+def out_path():
+    return argv[-1]
+
+
+if "-version" in argv:
+    print("ffmpeg version 8.1.2-Jellyfin Copyright (c) 2000-2026 the FFmpeg developers\nbuilt with gcc 14")
+    sys.exit(0)
+if "-filters" in argv:
+    names = os.environ.get("FAKE_FILTERS", "scale,format,hwupload,hwupload_cuda,libvmaf,libvmaf_cuda").split(",")
+    print("Filters:\n  T.. = Timeline support")
+    for n in names:
+        print(f" ... {n:<18}V->V       fake")
+    sys.exit(0)
+if "-f" in argv and argv[argv.index("-f") + 1] == "framemd5":
+    src = argv[argv.index("-i") + 1]
+    print("#format: frame checksums\n#version: 2")
+    for i in range(frames):
+        print(f"0, {i:10d}, {i:10d}, 1, 3110400, {hashlib.md5(f'{os.path.basename(src)}:{i}'.encode()).hexdigest()}")
+    sys.exit(0)
+if "-frames:v" in argv:                                            # the decode probe: stderr is the answer
+    sys.stderr.write(os.environ.get("FAKE_PROBE", "Stream mapping: h264 (native) -> wrapped_avframe\n"))
+    sys.exit(int(os.environ.get("FAKE_PROBE_RC", "0")))
+if "-lavfi" in argv:                                               # libvmaf: write the log the filter string names
+    graph = argv[argv.index("-lavfi") + 1]
+    m = re.search(r"log_path='([^']+)'", graph)
+    with open(m.group(1), "w") as f:
+        json.dump({"pooled_metrics": {"vmaf": {"mean": 95.25, "harmonic_mean": 95.0}, "cambi": {"mean": 0.31}, "psnr_y": {"mean": 44.5}, "float_ssim": {"mean": 0.985}}}, f)
+    sys.exit(0)
+if "ffvhuff" in argv:                                              # the lossless rescale: a copy stands in for the pixels
+    src = argv[argv.index("-i") + 1]
+    with open(src, "rb") as a, open(out_path(), "wb") as b:
+        b.write(a.read())
+    sys.exit(0)
+# an encode or a leg
+src = argv[argv.index("-i") + 1] if "-i" in argv else ""
+rc = int(os.environ.get("FAKE_RC", "0"))
+if rc:
+    sys.stderr.write("[fake] Error initializing the encoder: unsupported (-3)\n")
+    sys.exit(rc)
+null_leg = argv[-2:] == ["null", "-"]
+if not null_leg:
+    size = 40000 + int(hashlib.sha256(" ".join(argv).encode()).hexdigest()[:4], 16)
+    with open(out_path(), "wb") as f:
+        f.write(b"x" * size)
+if "-progress" in argv:
+    with open(argv[argv.index("-progress") + 1], "w") as p:
+        total = "N/A" if null_leg else str(size)
+        p.write(f"frame={frames // 2}\nfps=0.00\ntotal_size={total}\nout_time_us=30000000\nspeed=12x\nprogress=continue\n")
+        p.write(f"frame={frames}\nfps=0.00\ntotal_size={total}\nout_time_us=60000000\nspeed=24.0x\nprogress=end\n")
+sys.exit(0)
