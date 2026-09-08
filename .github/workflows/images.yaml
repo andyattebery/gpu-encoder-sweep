@@ -1,0 +1,54 @@
+name: images
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+permissions:
+  contents: read
+  packages: write
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v10
+      - run: uv sync --locked
+      - id: v
+        run: echo "version=$(uv run python -c 'import importlib.metadata as m; print(m.version("gpu-encoder-sweep"))')" >> "$GITHUB_OUTPUT"
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: [hub, node-encode, node-score]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: tags
+        run: |
+          repo="ghcr.io/${{ github.repository_owner }}/gpu-encoder-sweep-${{ matrix.image }}"
+          short="${GITHUB_SHA::7}"
+          tags="${repo}:sha-${short}"
+          if [ "${{ github.ref_type }}" = "tag" ]; then tags="${tags},${repo}:${{ github.ref_name }}"; else tags="${tags},${repo}:main"; fi
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile.${{ matrix.image }}
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            SETUPTOOLS_SCM_PRETEND_VERSION=${{ needs.version.outputs.version }}
+            SWEEP_ARTIFACT=${{ matrix.image }}:${{ needs.version.outputs.version }}
+            SWEEP_HARNESS_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max

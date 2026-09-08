@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+# The hub: FastAPI + SQLite (the record), installed by uv from the lock. Runs on nas-01 behind traefik, Redis beside it.
+# CI passes SETUPTOOLS_SCM_PRETEND_VERSION (the version the checkout reports), SWEEP_ARTIFACT (hub:<version>) and
+# SWEEP_HARNESS_SHA; a build without them says so in /etc/sweep-artifact rather than inventing a version.
+FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
+COPY --from=ghcr.io/astral-sh/uv:0.12.10 /uv /uvx /bin/
+ARG SETUPTOOLS_SCM_PRETEND_VERSION=0+unbuilt
+ARG SWEEP_ARTIFACT=hub:0+unbuilt
+ARG SWEEP_HARNESS_SHA=unknown
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${SETUPTOOLS_SCM_PRETEND_VERSION} UV_PYTHON_DOWNLOADS=never
+WORKDIR /app
+COPY pyproject.toml uv.lock README.md .python-version ./
+COPY sweep ./sweep
+RUN uv sync --locked --extra hub --no-dev --no-editable
+RUN printf '%s\n%s\n' "$SWEEP_ARTIFACT" "$SWEEP_HARNESS_SHA" > /etc/sweep-artifact
+ENV PATH="/app/.venv/bin:${PATH}" SWEEP_STORE=/data/hub.sqlite SWEEP_SHARE=/share SWEEP_FRAMES=/data/frames SWEEP_BIND=0.0.0.0:8000
+VOLUME ["/data"]
+EXPOSE 8000
+ENTRYPOINT ["sweep-hub"]

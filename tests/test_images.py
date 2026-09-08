@@ -18,5 +18,30 @@ class Version(unittest.TestCase):
         self.assertRegex(version, r"^\d+(\.\d+)*(\.dev\d+)?(\+g[0-9a-f]{7,}(\.d\d{8})?)?$")
 
 
+class Dockerfiles(unittest.TestCase):
+    FILES = ("hub", "node-encode", "node-score")
+
+    def test_every_base_is_pinned_and_the_package_comes_from_the_lock(self):
+        for name in self.FILES:
+            text = (ROOT / "docker" / f"Dockerfile.{name}").read_text()
+            with self.subTest(image=name):
+                froms = [l.split()[1] for l in text.splitlines() if l.startswith("FROM ")]
+                self.assertTrue(froms)
+                for ref in froms:
+                    self.assertNotIn(":latest", ref, ref)
+                    self.assertTrue("@sha256:" in ref or ":" in ref.rsplit("/", 1)[-1], f"{ref} carries no tag or digest")
+                self.assertIn("uv sync --locked", text)
+                self.assertIn("/etc/sweep-artifact", text)
+                self.assertNotIn(":latest", text.replace("tdarr_node:latest resolved", ""))    # the comment may say where the digest came from
+
+    def test_the_images_workflow_builds_all_three_and_pins_its_actions(self):
+        text = (ROOT / ".github" / "workflows" / "images.yaml").read_text()
+        for name in self.FILES:
+            self.assertIn(name, text)
+        self.assertRegex(text, r"uses: docker/build-push-action@v\d+")
+        self.assertIn("SETUPTOOLS_SCM_PRETEND_VERSION=", text)
+        self.assertIn("packages: write", text)
+
+
 if __name__ == "__main__":
     unittest.main()
