@@ -95,7 +95,7 @@
      "today": ["sweep.py:2418"],
      "test": "An invocation that fails to launch raises rather than returning a capability verdict.",
      "disposition": "check",
-     "how": "`x_verdict_without_cells`: a verdict must name the encodes behind it; and the agent's decode probe raises on an invocation that did not run, so no capability verdict comes from an empty stderr"},
+     "how": "`x_verdict_without_cells`: a verdict must name the encodes behind it; and the agent's decode probe (`ffm.decode_path_of`) raises on an invocation that did not run -- no signature and a non-zero status is not a capability answer -- so no decode path comes from an empty stderr"},
 
     {"id": "adm-count-frames-not-status",
      "invariant": "A leg or stage is verified by FRAME COUNT, never by exit status.",
@@ -349,7 +349,7 @@
      "today": ["tools/push_node.py"],
      "test": "A timing run is not handed to an agent while another run is active on its machine; a second enqueue on a host queues instead of launching; no verb pushes code.",
      "disposition": "check",
-     "how": "`x_timing_run_not_alone`, per `host.machine`: a timing run is refused while any other run is active on its machine, whichever runtime holds it, at enqueue and again at claim; the push half is closed by construction -- an agent runs one job at a time and no code is pushed"},
+     "how": "`x_timing_run_not_alone`, per `host.machine`: a timing run is refused while any other run is active on its machine, whichever runtime holds it -- `planner.busy_on_machine` at enqueue, and again at claim, where the entry waits (204) until the machine is quiet; the push half is closed by construction -- an agent runs one job at a time and no code is pushed"},
 
     {"id": "orc-prove-the-push",
      "invariant": "After every push, prove arrival by sha on BOTH ends and refuse if they still differ.",

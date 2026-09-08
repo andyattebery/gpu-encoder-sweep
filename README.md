@@ -15,7 +15,8 @@ a transcode flow runs.
     uv sync --locked --extra hub --extra cli --extra node    # the locked environment: uv.lock and .python-version are the one pin
     uv run make check                           # the tests, the model proof (every check fires on its negative case), the docs current
 
-Status: M1 — the schema, its proof, the hub (every authoring verb, ingest, the queue's contract, export)
-and the CLI are here, proven by the fixture replayed through the API; the agents, the Redis queue and
-the images (M2) follow.
+Status: M2 — the schema and its proof, the hub (every authoring and mechanical verb, ingest, the
+Redis queue, the agent endpoints, export), the CLI, the node agent (proven end to end in-process with
+fake tools, and on a real Redis under `make integration`) and the three images are here; the
+two-cell smoke on real hardware waits on the infrastructure roles. The acceptance run (M3) follows.
 The images vendor jellyfin-ffmpeg (GPL) and FFVship, which keep their own licences.

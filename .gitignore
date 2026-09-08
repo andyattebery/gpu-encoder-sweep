@@ -8,3 +8,6 @@ dist/
 
 # the schema is the source of the model; the operator's global ignore has *.sql
 !sweep/schema.sql
+
+# the agents' tokens, read by the hub from SWEEP_AGENT_TOKENS: never committed
+agent-tokens.json

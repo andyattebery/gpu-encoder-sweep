@@ -50,14 +50,17 @@ laptop                       nas-01 (always on)                       GHCR      
 | `…-node-score` | `nvidia/cuda:13.3.1-runtime-ubuntu26.04` (FFVship needs libavutil ≥ 7, per `ffvship/Dockerfile.cuda`) | FFVship and `libvship.so` from a build stage at Vship v5.1.0 (from Codeberg, the source; GitHub is a stale mirror) — **the version the committed values were scored with, pinned on purpose**: a newer tag is a new `scorer_build`, which the acceptance comparison cannot be run across; the same jellyfin-ffmpeg build (`libvmaf_cuda`); python3; the agent | media-01, eta-wsl |
 
 The native Windows agent is the same package, run by the boot task as `uvx --from
-git+https://github.com/andyattebery/gpu-encoder-sweep@<tag> sweep-node serve`; uv resolves the
-dependencies and the interpreter, and updating it is the role bumping the tag. A plan names the
-artifact it was built for — the image digest, or the package version and git sha `sweep-node`
-reports — as the target host's agent last reported it, and the hub hands a run only to an agent
-whose heartbeat still reports it, so a node running code the plan was not built for is refused
-rather than silently measured. The
-infrastructure repo pins the GHCR tags and the git tag its stacks and tasks run; `harness_version`
-on every run is that sha.
+"gpu-encoder-sweep[node] @ git+https://github.com/andyattebery/gpu-encoder-sweep@<sha or tag>" sweep-node serve`;
+uv resolves the dependencies and the interpreter, and updating it is the role bumping the ref. The
+package versions itself from git (hatch-vcs: `X.Y.Z` at a tag, `X.Y.Z.devN+g<sha>` past one), and an
+artifact is `<flavour>:<version>` — `node-encode:…`, `node-score:…`, `hub:…` from the stamp CI writes
+into the image, `uvx:…` on eta — with `harness_version` the git sha (or the tag, which names one). An
+agent reports its identity — the artifact, the ffmpeg build, sha and filters, FFVship's version —
+in every heartbeat, and the hub keeps each change as a `host_identity` row. A plan pins the identity
+its host last reported, and the claim hands the run over only while the host still reports that
+artifact (a 409 with the fix otherwise), so a node running code the plan was not built for is
+refused rather than silently measured. The infrastructure repo pins the GHCR tags and the git ref
+its stacks and tasks run.
 
 ### Schema changes the architecture requires
 
@@ -116,20 +119,34 @@ rung on the ladder, chain exists) · `calibrate --lane --title`
 (HEADROOM's full-length encode) / `--from-run` (RUNG_FACTOR, BOUND, HOST_THRESHOLD; no value flag).
 
 **Mechanical** (plan → enqueue → wait → ingest, all inside the hub; the count is `len(cells)`):
-`inventory` (a run on a host that mounts the library; the agent posts `title` records) ·
-`propose-window --title` (recipe W1 on a node: prints the candidate `ss` and its score; nothing is
-written until `pin-window`) · `materialise [--adopt]` (a run on the host whose chain builds the
-cuts; adopt registers existing cuts by content hash; a differing hash is refused; then distributes
-the reference set to every host that needs it) · `verify` (a run per host: the content hash and the
-content checks) · `screen` · `locate` · `derive-ladders` · `encode [--stage viewing]` ·
-`score --run [--scorer host] [--keep] [--concurrency N]` (height is the search's; no height flag exists; the scorer defaults to
-the same machine's scorer; refuses a scorer whose build lacks its backend's filter, a reference cut
-absent or differing there, a second scorer on a search without an exact equivalence; publishes
-encodes to the share when the scorer is on another machine) · `equivalence --search --scorers a,b
-[--arms …]` (the same cells on both with `--keep`; per-frame identity for the FFVship metrics, per
-statistic for libvmaf; writes `scorer_equivalence`) · `time [--workers 1,2,3,4] [--split]` ·
+`inventory --host --library --titles` (a run on a host that mounts the library; the agent probes each
+named file — `title_id=path` pairs, the id the operator's — and posts a `title` record; the library
+scan that finds the files is M4's) · `propose-window --title` (recipe W1 on a node: prints the
+candidate `ss` and its score; nothing is written until `pin-window`) · `materialise --adopt` (a run
+on a host holding existing cuts, which the agent hashes, counts and copies into the reference set's
+home under its work root; the cuts name the chain that built them, wherever that was; a second host
+adopting the same set posts cut records only, and a differing content hash is refused; cutting is
+M4's) · `verify` (a run per host: the content hash and the content checks) · `screen` · `locate` ·
+`derive-ladders` · `encode --search [--windows --rungs --arms]` (Stage 5 from the search: the base
+arm on every in-range rung on every member, each candidate on its own derived ladder, the incumbent
+at its pinned anchor; the filters name subsets that must exist; a key that already exists is skipped
+and reported, and nothing left is refused) / `encode --stage viewing --content-class-id --encoder-unit-id
+--cells` (the operator names each cell's window and identity settings; no search) ·
+`score --run [--scorer host] [--keep]` (the height is the search's, or, for a run with no search,
+the one height its class's served lanes share — no height flag exists; the scorer defaults to the one
+on the parent's machine, viewing its files through `local_view`; refuses a scorer whose reported
+filters lack its backend's, a reference cut or an encode reachable neither on its machine nor on the
+share, a second scorer on a search without an exact equivalence; `--concurrency` is M4's) ·
+`publish --run | --cut-ids [--via host]` (a job on a host's queue: a run's kept encodes, or cuts,
+copied to the share with a sha both ends, read through `local_view` when another runtime does the
+writing) · `equivalence --search --scorers a,b [--arms …]` (the same cells on both with `--keep`;
+per-frame identity for the FFVship metrics, per statistic for libvmaf; writes `scorer_equivalence`) ·
+`time --run [--lane] [--repeats]` (every configuration the run encoded, on the source cut, through
+the lane's chain; `--lane` when the class serves several; `--workers` and `--split` are M4's) ·
 `probe --lane --unit --host --title` (its slices are the one machine-written rows of `window`,
-`origin = generated`) · `watch --run` (follows; never launches) · `abandon --run --reason`.
+`origin = generated`) · `watch --run-id` (server-sent events: the run's events so far, then whatever
+follows to a terminal one; exits by it; never launches) · `abandon --run-id --reason` (the event the
+agent reads between cells; a finished run is not abandoned).
 
 **Read-only**: `check` · `status` (answers from the hub's state; a silent agent is reported silent,
 so a downed node cannot kill it) · `rank` · `categorise` · `invert` · `render [--check]` (the build
@@ -146,11 +163,15 @@ Agents speak REST to the hub and nothing else; the hub is the only Redis client.
 
 | endpoint | who | semantics |
 |---|---|---|
-| `POST /agents/{host}/claim` (long-poll, 30 s) | agent | the hub reads the host's queue (`XREADGROUP` on `harness:queue:{host}`, consumer = host, one entry) and returns the run: the plan inline, the artifact it was built for, share and work paths in the host's spelling; a restart returns the agent's own pending entry first (`XAUTOCLAIM`); a resume is idempotent because a cell with a record is skipped; the claim posts `launched`; a timing run is handed out only while its machine is quiet, and waits in the queue otherwise |
-| `POST /agents/{host}/heartbeat` | agent, every 30 s | `{run_id, cells_done, cells_total, artifact, identity}` with a 90 s TTL; the hub hands a run only to an agent whose artifact and identity agree with the plan and the catalogue |
-| `POST /runs/{id}/events` | agent and hub | `{at, state, detail, by}`; appended to the run's stream and to `run_event`; `run.state` is the last event |
-| `POST /runs/{id}/records` | agent | one record per cell as it completes; ingested at once, so progress is the store's own count; a record posted twice is idempotent |
-| `POST /runs/{id}/ack` · `GET /runs/{id}/abandon` | agent | `XACK` on completion; the abandon flag checked between cells |
+| `GET /agents/{host}/config` | agent, at start | the host row and its scorer row: everything beyond the agent's three environment variables (`SWEEP_HUB`, `SWEEP_TOKEN`, `SWEEP_HOST`) |
+| `POST /agents/{host}/claim` (long-poll, `block_s`) | agent | the hub reads the host's queue (`XREADGROUP` on `harness:queue:{host}`, consumer = host, one entry) and returns the run: the plan inline with every cell's argv, the inputs in the host's spelling, and `done`, the cells already recorded, so a resume is idempotent; a restart returns the agent's own pending entry first (`XAUTOCLAIM`) with no new event; a planned or failed run is posted `launched` here, for the artifact the host currently reports (a 409 with the fix when it differs, and the entry waits); a timing run is handed out only while its machine is quiet (204, the entry waits); a finished run's stale entry is acked away; a publish job comes back the same way with its files |
+| `POST /agents/{host}/heartbeat` | agent, every 30 s | `{run_id, cells_done, cells_total, artifact, identity}` kept in Redis with a 90 s TTL; an identity that differs from the host's current row is recorded; `status` reports a silent agent as silent, never as zero |
+| `POST /runs/{id}/events` | agent | `{state, detail}`, `running` or `failed`; the hub stamps `at` from its own clock, so one clock orders a run's log, and writes `by = agent`; `run.state` is the last event |
+| `POST /runs/{id}/records` | agent | one record per cell as it completes, a batch in one transaction; ingested at once, so progress is the store's own count; a record posted twice is idempotent; a refused batch rolls back whole |
+| `POST /runs/{id}/frames` | agent | a cell's per-frame values for one metric, kept gzipped beside the store and outside the export; the height is the run's, never a field |
+| `POST /runs/{id}/ack` | agent | the hub verifies the records against the plan, stage by stage: `complete` with `verified_at`, or `failed` with what is missing (an abandoned run is released and stays abandoned); then `XACK` |
+| `GET /runs/{id}/abandon` | agent | the flag checked between cells, with the reason |
+| `POST /agents/{host}/ack` · `POST /exchange/published` | agent | a publish job's ack, refused until every file it named is a `published` row; the exchange's proof of one file: the sha the agent computed before the copy, which the hub checks against the file at its bind-mounted pool path before recording it |
 
 `Queue` is an interface with `RedisQueue` and `FakeQueue` (same semantics), so every hub test runs
 in-process under the FastAPI test client; the real Redis is exercised by the integration suite,
@@ -159,69 +180,89 @@ Live `watch` is server-sent events fed by Redis pub/sub.
 
 **The share is the data plane**, under `temp/harness/` (a subdirectory of `temp/`, never the share
 root): `runs/<run_id>/enc/` and `refsets/<reference_set_id>/`. Each host addresses it in its own
-spelling from `host.share_root`; the hub has the pool path bind-mounted. `publish` and `pull` copy
-and sha both ends; a node pulls inputs to its work root before use, because containers see the
-share read-only and a timing run must read local disk. Two runtimes on one machine use
-`host.local_view` instead. Encodes bound for another machine and reference sets move through the
-share; plans, records and events never touch it. Nothing transits the laptop.
+spelling from `host.share_root`; the hub has the pool path bind-mounted. `publish` copies to the
+share and shas both ends (the agent's before the copy, the hub's after, at the pool path), and
+every runtime that publishes mounts `temp/harness` read-write; `pull` copies from the share to the
+work root and checks the sha the hub recorded, because a timing run must read local disk and a
+transfer is proven, never assumed. Two runtimes on one machine use `host.local_view` — the owner's
+work root as the viewer spells it — instead, and eta's encodes leave the machine only through its
+scoring container's mount, as a publish job `--via eta-wsl`. Encodes bound for another machine and
+reference sets move through the share; plans, records and events never touch it. Nothing transits
+the laptop. The exchange's record is `published`: one row per file, keyed by its share path.
 
-**The mechanical verbs on top.** `enqueue(run)`: refuse `host.blocked` with the fix text, refuse the
-quiet-box check, write the plan rows, `XADD` the entry, post `planned` — one transaction, so a run
-cannot be launched unobserved. `wait(run)` is the hub's own loop: `running` at the first record;
-`complete` with `verified_at` when the records match the plan's cells and heights; an expired
-heartbeat with the run unfinished posts `failed` with the count reached. Nothing ever reads an
-agent's log.
+**The mechanical verbs on top.** `enqueue(run)`: the plan rows and the `planned` event in one
+checked transaction — a blocked host, an unquiet machine and every other check refuse here — then
+the `XADD`; two stores cannot share one transaction, so a queue write that fails after the commit
+leaves the run `abandoned` and visible in `status`, and a claim of an entry whose run is finished is
+acked away. The agent posts `running` when it starts its first cell. `wait` is the hub's own loop:
+an active run whose host's heartbeat has expired is posted `failed` with the count reached, and its
+entry stays for the restart; the ack is where `complete` with `verified_at` is decided, against the
+plan's cells and, for a score run, its parent's kept encodes. Nothing ever reads an agent's log.
 
-**On the node.** The agent runs `identify` at start and on every artifact change — FFVship
-`--version`, the ffmpeg builds' `-version`, `-filters` and sha, the image digest or the pyz sha,
-free space under its work root — and sends it in its heartbeat; it refuses a score job when its
-build lacks the backend's filter. The eta scoring container probes a write under `temp/harness/`
-on its CIFS mount before any job that publishes and refuses that job with the fix when denied; the
-mount's credential comes from the vault through the compose role, as htpc-01's does.
+**On the node.** The agent runs `identify` at start — FFVship `--version`, the ffmpeg build's
+`-version`, `-filters` and sha, the artifact from the image's stamp or the package's version, free
+space under its work root — and sends it in every heartbeat; the score planner refuses a scorer
+whose reported filters lack the backend's before anything is enqueued. Before any job that
+publishes, the agent writes and removes a probe file under `temp/harness/` on its mount (the eta
+scoring container's CIFS mount is the case this exists for) and refuses the job with the fix when
+denied; the mount's credential comes from the vault through the compose role, as htpc-01's does.
 
 **Auth and exposure.** The hub sits behind nas-01's traefik at `harness.<domain_name>` with TLS;
-every client presents a bearer token from the vault — one for the laptop, one per agent — and the
-agent endpoints accept only the token of the host they name.
+every client presents a bearer token from the vault — the operator's (`SWEEP_TOKEN`) and one per
+agent (a JSON file `{host: token}` named by `SWEEP_AGENT_TOKENS`, never the store, which is
+exported). An agent route (the `agents` tag) opens to an agent's token only, and only for the host
+it names or the run's host; every other route opens to the operator's only; the wrong door is a 401
+in the refusal's form.
 
 **What ssh is still for**: `identify` on demand and diagnostics. No launch strings, no
 detached-process flags, no busy probe, no per-OS counting, no file transfer by the laptop.
 
 ### The node agent — `sweep/node/`
 
-`agent.py` (`serve`: read the hub URL, token, host name and paths from its config; long-poll
-`claim`; per run: pull inputs, verify shas, refuse a plan for another artifact, run the cells one
-job at a time, heartbeat, post each record as it completes, post events, ack; `identify`;
-`hash <paths>`; `httpx` for the API, dependencies declared in the `node` extra) · `ffm.py`
-(subprocess, `-progress` parsing requiring `progress=end`, framemd5 content hash and frame count,
-decode probe reading stderr signatures, the W1 scan (`signalstats` and `scdet` at 1 Hz), tool
-versions with the ffmpeg sha computed inside the container) · `scoring.py` (recipe S1 exactly; the
-reference rescaled once per (cut, geometry) and released; FFVship per-frame values pooled by nearest
-rank; libvmaf one pass, input 0 distorted, with the argv the plan carries — the CUDA or the plain
-graph is the builder's choice from the scorer's `metric_backend`, never the node's; the three metric
-steps through `pool.run_all`) · `timing.py` (recipe T1; workers each with their own progress dir;
-NAS warm only for library titles; legs executed as given) · `pool.py` (concurrency handled once:
-join every future, raise the first error in submission order) · `records.py` (atomic writes,
-nothing overwritten). Records: `encode` (bytes, frames, out_time, bitrate, decode_path, rc, or a
-failure with stderr), `score` (pooled statistics, per-step seconds, scorer versions; per-frame
-arrays uploaded separately and kept by the hub beside the store, outside the export), `timing`
-(samples with `is_warmup`, and the frame count per leg).
+`agent.py` (`serve`: three environment variables, the rest from `GET /agents/{host}/config`;
+long-poll `claim`; per run: re-post any record on disk the hub lacks, post `running`, run every
+cell not in `done` one job at a time, write each record atomically then post it, heartbeat, read
+the abandon flag between cells, ack; a publish job the same way with its files; `identify`;
+`hash <paths>`; `httpx` for the API, dependencies declared in the `node` extra) · `config.py` ·
+`identity.py` · `ffm.py` (subprocess with argv lists, `-progress` parsing requiring `progress=end`,
+framemd5 content hash and frame count, the decode probe read from stderr signatures — a probe that
+did not run raises, never answers — tool versions with the ffmpeg sha computed where it runs, a bare
+Windows path taken whole) · `jobs.py` (encode by frame count with bytes from the disk, or a failure
+record carrying stderr; a title from ffprobe with F1's source-type heuristic; adopt: hash, count and
+copy a cut into the reference set's home; recipe S1 exactly — the reference rescaled once per (cut,
+geometry) and released, FFVship per-frame values pooled by nearest rank, libvmaf one pass, input 0
+distorted, the CUDA or the plain graph from the scorer's `metric_backend`, the three metric steps
+through `pool.run_all`, the encode discarded unless the plan keeps it; recipe T1 — repeats with the
+first flagged warm-up, every leg verified by frame count, the encode discarded; pull and publish by
+sha) · `pool.py` (concurrency handled once: join every future, raise the first error in submission
+order) · `records.py` (atomic writes, nothing overwritten). The W1 scan, `timing --workers` and
+`--split` are M4's. Records: `encode` (bytes, frames, duration, bitrate, decode_path, kept, or a
+failure with stderr and rc), `title`, `reference_set`, `cut`, `score` (pooled statistics, per-step
+seconds; per-frame arrays uploaded separately and kept by the hub beside the store, outside the
+export), `timing` (samples with `is_warmup`, and the frame count per leg). Every argv comes from the
+plan or from the one builder called with the plan's parameters.
 
 ### Data formats
 
 - **API bodies** are typed models, one per verb, generated into the OpenAPI document; unknown
   fields are rejected (`extra = forbid`); enums and references are validated by the store's DDL and
   checks. Host tool paths are argv lists, never shell strings.
-- **The plan handed to an agent**: `run` (stage, host, node_label, unit, class, search, device,
-  tools, work_root, versions, recipes, artifact) · `windows` · `inputs` (cut paths in the host's
-  spelling with content shas verified before use) · `cells` (cell_key, window, cut, settings with
-  roles, argv, output, keep, repeats, workers, legs) · `exchange` (which outputs to publish). A
-  score job names the height, geometry, references and cells, and where each encode is pulled from.
+- **The plan handed to an agent** (the claim body): `run` (run_id, stage, host, node_label, unit,
+  class, search, device, tools, work_root, share_root, versions, recipes, artifact) · `windows` ·
+  `inputs` (per cut: the path in the host's spelling — the reference set's home under the work root,
+  or a share path to `pull` with its published sha — the content sha, the frame count, and the probe
+  argv for a source cut) · `cells` (cell_key, window_id, cut_kind, settings with roles, argv,
+  output, keep, repeats, workers, legs) · `score` (the height, the geometry, keep, the metric
+  backend, the scorer's tools; per cell where its encode and its reference are, viewed or pulled) ·
+  `reference_set` and `cuts` for an adopt · `done` (the cells already recorded). A publish job is
+  `{kind: publish, by_host, files: [{local, relative, run_id, cell_key, cut_id}], done}`.
 - **Ingest** maps records to `encode`/`cell_failure`, `score` rows (`ssimulacra2` mean·p5·min,
   `butteraugli` max, `vmaf`/`cambi`/`psnr_y`/`float_ssim` mean, `recipe`, `scorer_build`, under the
   score run), `step_trace`, `timing`; derived tables (`setting_verdict`, `arm_ladder_rung`, `constant_value`) are
   written by the hub's own verbs.
 - **The export** (the campaign repo's `record/`): `authored/<table>.json`, `sample/<table>.json` (the
-  sample's ROW tables: title, reference set, cut, cut check), `runs/<id>/plan.json`,
+  sample's ROW tables: title, reference set, cut, cut check), `agents/<table>.json` (what the agents
+  reported outside any run: `host_identity`, `published`), `runs/<id>/plan.json`,
   `runs/<id>/events.jsonl`, `runs/<id>/records/*.json`, `constants.json`, `openapi.json` —
   deterministic ordering, so a re-export of unchanged state is an empty diff.
 
@@ -231,22 +272,23 @@ arrays uploaded separately and kept by the hub beside the store, outside the exp
 |---|---|
 | `sweep/hub/app.py` | the FastAPI app factory: routers, the bearer-token middleware, the two handlers that make a refusal a 422 plain-text `REFUSING` body, store and queue wired per process |
 | `sweep/hub/refusals.py` | the one form, composed from the schema: the named constraints' fixes, SQLite's enum, NOT NULL, UNIQUE, foreign-key and STRICT messages read into it, a firing check with its `-- @fix` |
-| `sweep/hub/api/{catalogue,sample,search,decision,runs,agents,analysis,record}.py` | one router per verb group; typed bodies; every write in a transaction that runs the checks |
+| `sweep/hub/api/{catalogue,sample,search,decision,runs,agents,analysis,record}.py` | one router per verb group; typed bodies; every write in a transaction that runs the checks; `runs` holds the mechanical verbs, `agents` (one router, no prefix, the `agents` tag) what an agent speaks |
+| `sweep/hub/auth.py`, `sweep/hub/wait.py` | who is speaking, by token and the route's tag; the hub's loop: the expired heartbeat, the verification at ack |
 | `sweep/hub/store.py` | SQLite from `sweep/schema.sql` (WAL, one writer, the schema pinned by `user_version`); every write one transaction that runs `model_check.run_checks`; `require`, `insert`, `RETURNING` ids, `plan_run`, `post_event`, `calibrate` |
 | `sweep/hub/ingest.py` | a posted record → rows |
 | `sweep/recipes.py` | pure functions named by recipe: `G1 panel`, `K1 cell_key`, `V1 verdict`, `T1 spread/nstar`, `R1 beats`, `nearest_rank`, `bd_rate` (ported from `analyze.py:140`); shared by hub and node |
 | `sweep/hub/build.py` | the one command builder: encode argv per frontend (from `sweep.py:690 build_encode_args`), production argv from `chain.vf_template`, legs as prefix truncation, cut/probe/rescale/FFVship/libvmaf argv |
-| `sweep/hub/planner.py` | stage planners → plan rows and the claim body; run ids `<stage>-<subject>-<UTC stamp>` |
+| `sweep/hub/planner.py` | stage planners → plan rows and the claim body; run ids `<stage>-<subject>-<UTC stamp to the microsecond>`; `enqueue`, `done_cells`, `claim_body` |
 | `sweep/hub/queue.py` | `Queue`, `RedisQueue` (streams, consumer groups, heartbeat TTLs, pub/sub), `FakeQueue` |
 | `sweep/hub/exchange.py` | the share in each host's spelling; the hub's bind-mounted view; `publish`/`pull` with sha both ends |
-| `sweep/hub/artifact.py` | records the artifact each agent reports (image digest, or package version and sha) and pins it into plans |
+| `sweep/hub/artifact.py` | the identity each agent reports, recorded when it changes (`host_identity`), and what a plan pins from the current one |
 | `sweep/hub/analysis.py` | rank (per window `bd_rate` over the shared range → median, k of n, per stratum), categorise (per decode path, UNMEASURED), invert on `lane.decision_rule` (tightest straddling pair, from `analyze.py:324`), content rate, screen and admissibility verdicts, `derive_ladders` (from `settings_search.py:299 locate_ladders`), calibrate (BOUND from `m4_routing.py:57-102`), equivalence, the comparison primitive |
 | `sweep/hub/render.py`, `sweep/hub/legacy.py`, `sweep/hub/export.py` | E1; `import-legacy` and `compare-legacy` (the campaign repo's committed CSVs, uploaded by the CLI); the deterministic export |
 | `sweep/cli/__init__.py` | `sweep`: one subparser per verb (the verb table proven equal to the OpenAPI document, field by field), `httpx` to the hub, prints replies, exits 1 on `REFUSING` and 2 when the hub is unreachable; `export`, `render` write into the campaign repo; run as `uvx --from git+…@<tag> sweep` or `uv tool install` |
-| `sweep/node/{agent,ffm,scoring,timing,pool,records}.py` | above; the same package in both node images and, via `uvx`, natively on eta |
+| `sweep/node/{agent,config,identity,ffm,jobs,pool,records}.py` | above; the same package in both node images and, via `uvx`, natively on eta |
 | `sweep/schema.sql`, `sweep/model_check.py` | unchanged in role: the schema is the source, the proof and the doc rendering stay |
 | `docker/Dockerfile.hub`, `docker/Dockerfile.node-encode`, `docker/Dockerfile.node-score` | the images above; `uv.lock` is the only place third-party packages are pinned, and every image installs from it |
-| `.github/workflows/ci.yaml`, `images.yaml` | tests + `model_check --mutate` + docs `--check` + integration against a Redis service; build and push the three images to GHCR on main and tags (the FFVship CUDA build stage cached); a tag is the unit of deployment for images and for `uvx` alike |
+| `.github/workflows/ci.yaml`, `images.yaml` | tests + `model_check --mutate` + docs `--check` + integration against a Redis service; build and push the three images to GHCR on main and tags (the FFVship CUDA build stage cached), each stamped with the checkout's version and sha; `docker/README.md` says what a role gives a container |
 
 Lifted verbatim from the archived harness, cited at the call site: `parse_progress` (`sweep.py:1013`), `nearest_rank`
 (`:1065`), `parse_ffvship_json` (`:1083`), `rescale_lossless` (`:1879`), `libvmaf_graph`/`score_libvmaf`
@@ -284,7 +326,9 @@ table below carries one row per refusal id; `test_refusals.py` asserts every `by
 appears in that table and that no request body outside the catalogue router carries a field named
 `count`, `device`, `height`, `directory` or `root` in the OpenAPI document. Honest labelling: the
 name test proves those words are absent from the mechanical bodies, not that no free input of those
-kinds exists; the by-construction claim rests on the verbs' shapes above.
+kinds exists; the by-construction claim rests on the verbs' shapes above. The agent router is the
+second exemption: its bodies are observations — a title's height, a frame count — posted by the
+node about what it saw, not inputs the operator chooses.
 
 The other twenty-five refusals are not closed here: `check` ones are `x_*` views or script checks the
 store runs on every write, and `process` ones are rules a stage applies. This table is only the class the shape
@@ -326,7 +370,7 @@ itself makes impossible.
 |---|---|---|
 | `art-extra-distinguishes-the-arms` | every field in the cell key survives into every reading | settings are `cell_setting` rows read through the comparison primitive; there is no CSV column to lose |
 | `art-move-stale-output-aside` | a previous output is never mistaken for this run's | products are rows under a new `run_id`; there is no whole-file producer, and a posted record is idempotent rather than overwriting |
-| `art-wait-on-the-artifact-not-the-log` | wait on the artifact, not a log, and detect a dead job | `wait` is the hub's own loop over `v_run_progress` and the heartbeat TTL; nothing reads an agent's log |
+| `art-wait-on-the-artifact-not-the-log` | wait on the artifact, not a log, and detect a dead job | `wait.py` is the hub's own loop over the heartbeat TTL, and the ack verifies the records against the plan; nothing reads an agent's log |
 | `art-check-staging-before-copying-into-it` | a leftover staging directory is checked before use | the share is addressed as `runs/<run_id>/`, allocated per run, and a cell is addressed by its key |
 | `art-never-glob-a-shared-directory` | drive from recorded paths, never a glob | the plan names every input path in the host's spelling, and the exchange copies by name |
 | `art-file-by-header-fingerprint` | an arriving table is filed by its content, not by the operator | nothing arrives as a table: an agent posts records to `/runs/{id}/records` and ingest maps them to rows |
@@ -366,8 +410,14 @@ rendered regions of `DATA-MODEL.md` are current). Modules are named, never disco
 - **The replay is the acceptance of the hub itself**: `test_hub_replay.py` builds the proof's fixture
   through the API and the ingest path in the campaign's order (86 steps), with no check firing at any
   step and the authored tables equal to the fixture's row for row; a re-export is an empty diff.
-- **The integration suite** exercises `RedisQueue`, the agent protocol and the exchange against a
-  Redis service container — in CI on every push, locally under `make integration` with Docker.
+- **The agent runs end to end in-process**: `tests/node_helpers.py` authors the smallest catalogue
+  through the API with the fake `ffmpeg`, `ffprobe` and `FFVship` under `tests/fake_tools/` as the
+  host's binaries, makes the sample through the agent's own inventory and adopt jobs, and
+  `test_node_agent.py` drives claim → records → ack for every stage, the killed agent's resume, the
+  refused artifact, abandon and a publish.
+- **The integration suite** exercises `RedisQueue` (the same contract mixin `FakeQueue` passes) and
+  the agent protocol on it against a Redis service container — in CI on every push, locally under
+  `make integration` with `SWEEP_TEST_REDIS` set and a Redis in Docker.
 - **Mutation checking**: a suite that cannot fail on a deliberate break is not evidence.
 
 ### The acceptance procedure
