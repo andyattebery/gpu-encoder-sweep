@@ -188,7 +188,7 @@ INSERT INTO host (host, machine, ssh_host, os, work_root, share_root, local_view
  ('htpc-01','htpc-01','htpc-01','linux','/run/media/system/data/sweep','/mnt/nas-01/sweep',NULL,'/ffmpeg/ffmpeg','root podman; the bind mount is the patched build',
   'mount the sweep tree into tdarr-node, point the work root at it, use /ffmpeg/ffmpeg, then clear this'),
  ('eta','eta','eta','windows','D:\sweep','\\nas-01\sweep',NULL,'c:\Program Files\jellyfin-ffmpeg\bin\ffmpeg.exe','native Windows, no bash',NULL),
- ('eta-wsl','eta','eta','linux','/home/sweep/work','/mnt/nas-01/sweep','/mnt/d',NULL,'the score container under WSL; eta''s own cells are scored through /mnt/d',NULL);
+ ('eta-wsl','eta','eta','linux','/home/sweep/work','/mnt/nas-01/sweep','/mnt/d/sweep',NULL,'the score container under WSL; eta''s own cells are scored through /mnt/d/sweep, its work root as WSL spells it',NULL);
 
 INSERT INTO encoder_unit VALUES
  ('intel-b580-ihd26.2.2-qsv-av1','intel','Arc B580','iHD 26.2.2','qsv','av1'),

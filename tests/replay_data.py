@@ -81,8 +81,8 @@ HOSTS = [
          ffmpeg="/ffmpeg/ffmpeg", notes="root podman; the bind mount is the patched build"),
     dict(host="eta", machine="eta", ssh_host="eta", os="windows", work_root="D:\\sweep", share_root="\\\\nas-01\\sweep",
          ffmpeg="c:\\Program Files\\jellyfin-ffmpeg\\bin\\ffmpeg.exe", notes="native Windows, no bash"),
-    dict(host="eta-wsl", machine="eta", ssh_host="eta", os="linux", work_root="/home/sweep/work", share_root="/mnt/nas-01/sweep", local_view="/mnt/d",
-         notes="the score container under WSL; eta's own cells are scored through /mnt/d"),
+    dict(host="eta-wsl", machine="eta", ssh_host="eta", os="linux", work_root="/home/sweep/work", share_root="/mnt/nas-01/sweep", local_view="/mnt/d/sweep",
+         notes="the score container under WSL; eta's own cells are scored through /mnt/d/sweep, its work root as WSL spells it"),
 ]
 UNITS = [
     dict(encoder_unit_id=B580, vendor="intel", card="Arc B580", driver="iHD 26.2.2", frontend="qsv", codec="av1", host="media-01", device="/dev/dri/by-path/pci-0000:03:00.0-render"),
