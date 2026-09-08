@@ -201,7 +201,7 @@
      "today": ["sweep.py:5310"],
      "test": "A build without the filter refuses before any cell runs.",
      "disposition": "process",
-     "how": "the launch primitive; `run.metric_backend` records what ran"},
+     "how": "the score planner refuses a scorer whose current `host_identity.ffmpeg_filters` lacks the backend's filter, before anything is enqueued; `run.metric_backend` records what ran"},
 
     {"id": "val-score-height-defaults-to-the-panel",
      "invariant": "The score height defaults to the panel derived per source, never the native control.",
@@ -357,7 +357,7 @@
      "today": ["tools/push_node.py"],
      "test": "A short or altered copy exits non-zero having asserted nothing.",
      "disposition": "process",
-     "how": "nothing is pushed: the plan names the artifact it was built for and the hub hands a run only to an agent whose heartbeat reports it; the exchange shas a transferred file on both ends"},
+     "how": "nothing is pushed: the plan names the artifact it was built for and the hub hands a run only to an agent whose heartbeat reports it; a transferred file is a `published` row carrying the sha the agent computed before the copy and the hub verified after it"},
 
     {"id": "orc-blocked-is-a-refusal-at-the-moment-of-use",
      "invariant": "An unusable host refuses at the moment of use, with the fix in the message.",

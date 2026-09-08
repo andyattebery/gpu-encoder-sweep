@@ -1400,6 +1400,8 @@ each change of grain is exactly where an aggregation bug enters.
 | **ship** | `(lane, host, step)` | everything above, `host_unit`, `chain`, `timing` | **`shipped`, `shipped_setting`, `routing_exclusion`** — routing by support, the deadline |
 | **calibrate** | a constant | the base arm's ladder, the population probe, the full-length encode | **`constant_value`** — a measured constant has no typed value; a policy one is typed with its reason |
 | **viewing** | a viewed pair, or an acceptance for a lane | reference-path encodes, KEPT | **`viewing_verdict`** — a person's; Stage 2 names it |
+| **the agent**, outside any run | an identity a host's agent reported | its own tools: the ffmpeg build's `-version`, `-filters` and sha, FFVship's version, the artifact it runs | **`host_identity`** — a plan pins the latest (`v_host_identity_current`), and a run for an artifact nobody reported is refused |
+| **the exchange** — publish · pull | a file on the share | a kept `encode`, or a `cut` | **`published`** — the sha the agent computed before the copy and the hub verified after it; a pull checks against it |
 
 ### Where the grain collapses — and what has to be true at each collapse
 

@@ -61,7 +61,8 @@ on every run is that sha.
 
 ### Schema changes the architecture requires
 
-Landed in M1 (the legacy row is M3's), each with fixture rows, a mutation case and a DDL refusal.
+Landed in M1, and the three rows marked M2 in M2 (the legacy row is M3's), each with fixture rows, a mutation case and a DDL
+refusal.
 
 | change | why |
 |---|---|
@@ -78,6 +79,9 @@ Landed in M1 (the legacy row is M3's), each with fixture rows, a mutation case a
 | `timing.frames` NOT NULL; `x_timing_short_of_frames` against the cut | a null-terminated leg processes zero frames and exits 0; a leg is verified by frame count, per leg |
 | `encode.kept` is flipped by ingest on the score record — the one column with a second writer, and the schema names it | scoring discards the encode; the fact is written where the discard is decided |
 | five checks that are preconditions of a later stage are scoped to it: `x_has_content_but_empty` once a title exists, `x_measured_constant_never_calibrated` once a lane in the constant's scope ships, `shipping_arm_ladder_complete` and `incumbent_arm_scored` once the search names its shipping arm, `x_run_on_a_blocked_host` on active runs only; every logic CHECK carries a `CONSTRAINT` name and every `-- @check` a `-- @fix`, so a refusal's fix is authored beside its rule | the fixture is built verb by verb through the API and passes through each of those states — a precondition is not a store invariant; and the `REFUSING: <what> -- <fix>` reply is composed from the schema, never invented in the store |
+| M2: `host_identity` (measurement, ROW, `@writer agent`): every identity a host's agent reported — the artifact `<flavour>:<version>` (the version carries the git sha), `harness_version`, the ffmpeg build, sha and filters, the FFVship version, free bytes; `v_host_identity_current` is the latest per host, what a plan pins and a claim is compared against; `x_run_artifact_not_reported`: a run whose `(host, artifact, harness_version)` no identity row carries | a plan is built for the code the node runs, and K1 needs the ffmpeg version string at plan time; the store keeps what was reported, the claim asks what is still reported |
+| M2: `published` (measurement, ROW, `@writer exchange`): a file on the share by its share-relative path — an encode with its run and cell, or a cut, never both (`published_names_one_thing`) — with the bytes and the sha the agent computed before the copy and the hub verified after it; `x_published_without_encode`: a published cell with no encode record | the share holds products of the record, never loose files; the score planner reads it to know what a scorer on another machine can pull |
+| M2: `x_score_height_not_a_served_lanes`: a score under a run with no search at a height no served lane of its class uses; ingest takes a search-less run's height from the one `lane.score_height` its class's served lanes share and refuses two | a screen or viewing run is scored without a search; I2b says every lane scores at its device's panel height, so the lane decides and two lanes need a search to choose |
 | the legacy tables `import-legacy` fills are not designed here; they land at M3 as a migration | the acceptance comparison needs the archived values in the store, and none of the record's own tables may hold them |
 
 ### The verbs — `sweep <verb>`, each an endpoint
