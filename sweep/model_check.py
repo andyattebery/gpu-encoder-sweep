@@ -510,6 +510,10 @@ INSERT INTO shipped_setting VALUES
  (9,'nvenc.preset','p3','identity',NULL),(9,'nvenc.cq','34','identity',NULL);
 INSERT INTO routing_exclusion VALUES
  ('m4-ipad-le1080p-sdr','eta','eta is not yet measured on this class: the B580 column exists and eta has none');
+-- what reached the share: one encode published for scoring elsewhere, and the source cut of a window, each with the sha both ends agreed on
+INSERT INTO published VALUES
+ ('runs/b580-qsv-av1/enc/c-a24-tng.mkv','b580-qsv-av1','c-a24-tng',NULL,'media-01',68000000,'3b1f0c9e7d5a4b2c1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d','2026-09-03T02:10'),
+ ('refsets/stage-1080p/tng.source.mkv',NULL,NULL,'tng.src','media-01',200000000,'9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f','2026-08-26T10:00');
 """
 
 
@@ -742,6 +746,9 @@ def run_checks(conn, tags):
 # ---------------------------------------------------------------- negative cases: each must be CAUGHT
 
 MUTATIONS = [
+    ("a published encode with no encode record", "DELETE FROM encode WHERE cell_key = 'c-b36-tng'; "
+     "INSERT INTO published VALUES ('runs/b580-qsv-av1/enc/c-b36-tng.mkv','b580-qsv-av1','c-b36-tng',NULL,'media-01',1,'sha','2026-09-03')",
+     "x_published_without_encode"),
     ("a run for an artifact its host never reported", "UPDATE run SET artifact = 'node-encode:0.0.2.dev0+gffffff' WHERE run_id = 'b580-qsv-av1'",
      "x_run_artifact_not_reported"),
     ("a shipped anchor off the ladder", "UPDATE shipped_setting SET value = '31' WHERE shipped_id = 1 AND setting_id = 'qsv.q'",
@@ -955,6 +962,8 @@ DDL_REFUSALS = [
      "INSERT INTO timing (cell_key, workers, repeat_index, fps, wall_s, decode_path, is_warmup) VALUES ('t-tng', 1, 5, 600.0, 2.4, 'hardware', 0)"),
     ("an event by nobody", "INSERT INTO run_event (run_id, at, state) VALUES ('b580-qsv-av1', '2026-09-03T03:00', 'running')"),
     ("an identity with no artifact", "INSERT INTO host_identity VALUES ('eta', '2026-09-06T08:00', NULL, 'g1', '8.1.2-Jellyfin', '0b0ea2d', '[]', NULL, 1)"),
+    ("a publish naming both a cell and a cut", "INSERT INTO published VALUES ('runs/b580-qsv-av1/enc/x.mkv','b580-qsv-av1','c-a24-tng','tng.src','media-01',1,'sha','2026-09-03')"),
+    ("a publish naming a cell with no run", "INSERT INTO published VALUES ('runs/b580-qsv-av1/enc/y.mkv',NULL,'c-a24-tng',NULL,'media-01',1,'sha','2026-09-03')"),
 ]
 
 
@@ -1054,7 +1063,7 @@ def render_writers(conn, tags):
     by_writer = OrderedDict()
     for t in db_tables(conn):
         by_writer.setdefault(tags[t]["writer"], []).append(t)
-    order = ["inventory", "materialise", "verify", "orchestrate", "agent", "encode core", "derive ladders", "screen", "score",
+    order = ["inventory", "materialise", "verify", "orchestrate", "agent", "exchange", "encode core", "derive ladders", "screen", "score",
              "time", "equivalence", "calibrate", "ship", "viewing", "authored"]
     out = []
     for w in order + [w for w in by_writer if w not in order]:

@@ -60,6 +60,8 @@ CONSTRAINT_FIXES = {
     "viewing_verdict_fits_kind": ("a verdict that does not fit the viewing's kind",
                                   "a pair is a, b, same or unsure; an acceptance is acceptable, not_acceptable or unsure"),
     "host_unit_device_by_slot": ("a device addressed by render node", "give --device by PCI path or a stable id; a render-node number inverted twice"),
+    "published_names_one_thing": ("a publish naming both an encode and a cut, or an encode without its run, or neither",
+                                  "a published file is one product of the record: an encode with its run and cell, or a cut"),
 }
 
 # (table, column) -> the fix, where `give --column` is not enough

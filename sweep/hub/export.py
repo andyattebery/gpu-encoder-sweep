@@ -26,8 +26,9 @@ EXPORT_HOMES = {
     "setting_verdict_cell": ("nested", None), "admissibility_verdict_cell": ("nested", None),
     "scorer_equivalence": ("record", "run_a"),
     "constant_value": ("constants", None),
-    # what the agents reported outside any run: identities (and, from M2, publishes)
+    # what the agents reported outside any run: identities and publishes
     "host_identity": ("agents", None),
+    "published": ("agents", None),
 }
 MANAGED = ("authored", "sample", "agents", "runs", "constants.json", "openapi.json")
 
