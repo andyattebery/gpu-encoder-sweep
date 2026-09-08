@@ -199,9 +199,12 @@ def ack(run_id: str, body: Ack, request: Request, store=Depends(get_store), queu
         entry = next((e for e in queue.pending(run["host"]) if e.entry_id == body.entry_id), None)
         if entry is None:
             raise Refusal(f"entry {body.entry_id!r} is not claimed by {run['host']}", "claim before ack")
-        reason = wait.verify_at_ack(conn, run, entry.plan)
-        state = "complete" if reason is None else "failed"
-        st.post_event(conn, run_id, stamp(), state, "verified against the plan: every cell recorded" if reason is None else f"acked with {reason}")
+        if run["state"] == "abandoned":                        # the agent stopped between cells as asked: the entry goes, the state stands
+            state = "abandoned"
+        else:
+            reason = wait.verify_at_ack(conn, run, entry.plan)
+            state = "complete" if reason is None else "failed"
+            st.post_event(conn, run_id, stamp(), state, "verified against the plan: every cell recorded" if reason is None else f"acked with {reason}")
     queue.ack(run["host"], body.entry_id)
     queue.publish(run_id, {"run_id": run_id, "state": state, "by": "hub", "final": True})
     return {"ok": True, "state": state}
