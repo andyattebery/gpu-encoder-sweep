@@ -15,7 +15,7 @@ from collections import OrderedDict, namedtuple
 
 import httpx
 
-Verb = namedtuple("Verb", "method path flags local", defaults=((),))   # flags: the body's fields in order; local: the CLI's own options
+Verb = namedtuple("Verb", "method path flags local params", defaults=((), ()))   # flags: the body's fields in order; local: the CLI's own options; params: the path's
 
 
 def boolean(text):
@@ -82,6 +82,15 @@ VERBS = OrderedDict([
     ("record-viewing", verb("/decision/record-viewing", "kind", "lane", "window_id", "cell_a", "cell_b", "viewed_on", "viewer", "verdict", "notes", "viewed_at")),
     ("ship", verb("/decision/ship", "lane", "host", ("rows", jsonarg))),
     ("exclude-route", verb("/decision/exclude-route", "lane", "host", "reason")),
+    ("inventory", verb("/runs/inventory", "host", "library", ("titles", jsonarg))),
+    ("materialise", verb("/runs/materialise", "host", "encoder_unit_id", "reference_set_id", "geometry", "pix_fmt", "chain_lane", "chain_host", "chain_unit",
+                         ("cuts", jsonarg), ("adopt", B))),
+    ("encode", verb("/runs/encode", "search_id", "content_class_id", "encoder_unit_id", "host", "stage", ("windows", csv), ("rungs", ints), ("arms", csv), ("cells", jsonarg))),
+    ("score", verb("/runs/score", "run_id", "scorer", ("keep", B))),
+    ("time", verb("/runs/time", "run_id", "lane", ("repeats", I))),
+    ("publish", verb("/runs/publish", "run_id", ("cut_ids", csv), "via")),
+    ("abandon", Verb("POST", "/runs/{run_id}/abandon", (("reason", S),), (), ("run_id",))),
+    ("watch", Verb("GET", "/runs/{run_id}/watch", (), (), ("run_id",))),
     ("status", get("/runs/status")),
     ("check", get("/analysis/check")),
     ("export", Verb("GET", "/record/export", (), (("into", "write the record's files under this directory, removing what an earlier export wrote"),))),
@@ -97,6 +106,8 @@ def build_parser():
         p = sub.add_parser(name, help=v.path)
         for name_, help_ in v.local:
             p.add_argument("--" + name_, dest=name_, metavar="DIR", help=help_)
+        for param in v.params:
+            p.add_argument("--" + param.replace("_", "-"), dest=param, required=True, metavar="ID")
         if v.method == "POST":
             p.add_argument("--from", dest="from_file", metavar="FILE", help="the body as JSON; flags override it")
             for field, parse in v.flags:
@@ -120,9 +131,14 @@ def main(argv=None, transport=None):
     args = build_parser().parse_args(argv)
     v = VERBS[args.verb]
     headers = {"Authorization": f"Bearer {args.token}"} if args.token else {}
+    path = v.path
+    for param in v.params:
+        path = path.replace("{" + param + "}", getattr(args, param))
     try:
-        with httpx.Client(base_url=args.hub, headers=headers, transport=transport, timeout=60.0) as client:
-            r = client.request(v.method, v.path, json=body_of(args, v)) if v.method == "POST" else client.request(v.method, v.path)
+        with httpx.Client(base_url=args.hub, headers=headers, transport=transport, timeout=None if args.verb == "watch" else 60.0) as client:
+            if args.verb == "watch":
+                return _watch(client, path)
+            r = client.request(v.method, path, json=body_of(args, v)) if v.method == "POST" else client.request(v.method, path)
     except httpx.TransportError as e:
         print(f"sweep: the hub at {args.hub} is unreachable: {e}", file=sys.stderr)
         return 2
@@ -133,3 +149,17 @@ def main(argv=None, transport=None):
         return 0
     print(r.text)
     return 1 if r.text.startswith("REFUSING") or r.status_code >= 400 else 0
+
+
+def _watch(client, path):
+    """Print each server-sent event's payload as it arrives; exit by the final state: 0 complete, 1 failed or abandoned."""
+    last = None
+    with client.stream("GET", path) as r:
+        if r.status_code >= 400:
+            print(r.read().decode())
+            return 1
+        for line in r.iter_lines():
+            if line.startswith("data: "):
+                print(line[6:])
+                last = json.loads(line[6:])
+    return 0 if last is not None and last.get("state") == "complete" else 1

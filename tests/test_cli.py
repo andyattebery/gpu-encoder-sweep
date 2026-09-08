@@ -75,6 +75,22 @@ class Flags(unittest.TestCase):
         self.assertEqual(json.loads(seen[0].content), {"setting_id": "s", "flag": "-s", "kind": "ordinal", "roles": ["preset"]})
 
 
+class PathsAndStreams(unittest.TestCase):
+    def test_path_parameters_are_flags_that_fill_the_path(self):
+        _, _, _, seen = run(["abandon", "--run-id", "encode-x-1", "--reason", "wrong settings"], lambda r: httpx.Response(200, json={"ok": True}))
+        self.assertEqual((seen[0].method, str(seen[0].url)), ("POST", "http://hub.test/runs/encode-x-1/abandon"))
+        self.assertEqual(json.loads(seen[0].content), {"reason": "wrong settings"})
+
+    def test_watch_prints_the_stream_and_exits_by_the_final_state(self):
+        sse = 'data: {"state": "running"}\n\ndata: {"state": "failed", "detail": "heartbeat expired", "final": true}\n\n'
+        rc, out, _, seen = run(["watch", "--run-id", "encode-x-1"], lambda r: httpx.Response(200, text=sse, headers={"content-type": "text/event-stream"}))
+        self.assertEqual((rc, str(seen[0].url)), (1, "http://hub.test/runs/encode-x-1/watch"))
+        self.assertEqual(out.splitlines(), ['{"state": "running"}', '{"state": "failed", "detail": "heartbeat expired", "final": true}'])
+        ok = 'data: {"state": "complete", "final": true}\n\n'
+        rc, _, _, _ = run(["watch", "--run-id", "encode-x-1"], lambda r: httpx.Response(200, text=ok, headers={"content-type": "text/event-stream"}))
+        self.assertEqual(rc, 0)
+
+
 class VerbsMatchTheApp(unittest.TestCase):
     def test_every_verb_has_a_subparser_and_the_flags_are_the_fields(self):
         store = Store()
@@ -83,17 +99,20 @@ class VerbsMatchTheApp(unittest.TestCase):
         expected = {}
         for path, ops in spec["paths"].items():
             for method, op in ops.items():
-                name = path.rsplit("/", 1)[-1]
+                if "agents" in op.get("tags", []):
+                    continue                                   # the agent is their client; they have no CLI verb
                 fields = []
                 body = op.get("requestBody")
                 if body:
                     ref = body["content"]["application/json"]["schema"]["$ref"].rsplit("/", 1)[-1]
                     fields = list(spec["components"]["schemas"][ref]["properties"])
-                expected[name] = (method.upper(), path, fields)
-        self.assertEqual(set(cli.VERBS), set(expected), "the CLI's verbs are the app's, no more and no fewer")
+                expected[(method.upper(), path)] = fields
+        by_route = {(v.method, v.path): name for name, v in cli.VERBS.items()}
+        self.assertEqual(set(by_route), set(expected), "the CLI's verbs are the app's, no more and no fewer")
         for name, verb in cli.VERBS.items():
             with self.subTest(verb=name):
-                self.assertEqual((verb.method, verb.path, [f for f, _ in verb.flags]), expected[name])
+                self.assertEqual([f for f, _ in verb.flags], expected[(verb.method, verb.path)])
+                self.assertEqual(list(verb.params), [p[1:-1] for p in verb.path.split("/") if p.startswith("{")])
 
     def test_help_lists_every_verb(self):
         out = io.StringIO()
