@@ -12,7 +12,7 @@ a transcode flow runs.
 | `docs/ARCHITECTURE.md` | how it is built: the hub service, the agents, the queue, the exchange, the images, deployment |
 | `docs/refusals.json` | the invariants, each with the incident that bought it and how the harness closes it |
 
-    uv sync --locked --extra hub --extra cli    # the locked environment: uv.lock and .python-version are the one pin
+    uv sync --locked --extra hub --extra cli --extra node    # the locked environment: uv.lock and .python-version are the one pin
     uv run make check                           # the tests, the model proof (every check fires on its negative case), the docs current
 
 Status: M1 — the schema, its proof, the hub (every authoring verb, ingest, the queue's contract, export)

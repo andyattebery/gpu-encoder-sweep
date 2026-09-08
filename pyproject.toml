@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "gpu-encoder-sweep"
-version = "0.0.1"
+dynamic = ["version"]        # from git through hatch-vcs: X.Y.Z at a tag, X.Y.Z.devN+g<sha> past one, so a build names its commit
 description = "A measurement harness that finds the settings a GPU encoder should ship, per content class and card."
 readme = "README.md"
 license = "MIT"
@@ -20,6 +20,12 @@ cli = ["httpx"]
 sweep = "sweep.cli.__main__:main"
 sweep-hub = "sweep.hub.app:main"
 sweep-node = "sweep.node.agent:main"
+
+[dependency-groups]
+dev = ["httpx2"]              # Starlette's TestClient wants httpx2; the CLI and the node stay on httpx
+
+[tool.hatch.version]
+source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["sweep"]
