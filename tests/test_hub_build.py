@@ -19,10 +19,11 @@ class OrderedFlags(unittest.TestCase):
         self.addCleanup(self.store.close)
 
     def test_e1_order_mode_selectors_then_the_anchor_then_the_rest_by_id(self):
-        # given in the wrong order on purpose; roles are carried through, computed and default_resolved included
-        settings = [("qsv.preset", "4", "identity"), ("qsv.adaptive_b", "-1", "default_resolved"), ("qsv.b_strategy", "0", "identity"), ("qsv.q", "24", "identity")]
+        # given in the wrong order on purpose; identity and computed settings are passed, a default_resolved one is recorded, not passed
+        settings = [("qsv.preset", "4", "identity"), ("qsv.adaptive_b", "-1", "default_resolved"), ("qsv.b_strategy", "0", "identity"),
+                    ("qsv.q", "24", "identity"), ("qsv.b_v", "21000", "computed")]
         with self.store.reading() as conn:
-            self.assertEqual(build.ordered_flags(conn, settings), [("-q:v", "24"), ("-adaptive_b", "-1"), ("-b_strategy", "0"), ("-preset", "4")])
+            self.assertEqual(build.ordered_flags(conn, settings), [("-q:v", "24"), ("-b_strategy", "0"), ("-b:v", "21000"), ("-preset", "4")])
             nvenc = [("nvenc.preset", "p2", "identity"), ("nvenc.cq", "20", "identity"), ("nvenc.rc", "vbr", "identity"), ("nvenc.tune", "uhq", "identity")]
             self.assertEqual(build.ordered_flags(conn, nvenc), [("-rc", "vbr"), ("-cq", "20"), ("-preset", "p2"), ("-tune", "uhq")])
 

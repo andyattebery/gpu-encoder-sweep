@@ -17,9 +17,13 @@ _KIND_ORDER = {"mode_selector": 0, "quality_anchor": 1}
 
 def ordered_flags(conn, settings):
     """[(flag, value)] in E1's order from [(setting_id, value, role)]: mode selectors first, the anchor next, the rest by
-    setting_id; every role is emitted (computed and default_resolved are real options the encoder saw)."""
+    setting_id. Identity and computed settings are passed; a default_resolved row records a default the harness looked
+    up so "absent" never needs interpreting later, and is not passed -- the encoder applies its default itself, and
+    passing it would change the argv the committed values were made with."""
     out = []
-    for setting_id, value, _role in settings:
+    for setting_id, value, role in settings:
+        if role == "default_resolved":
+            continue
         row = conn.execute("SELECT flag, kind FROM setting WHERE setting_id = ?", (setting_id,)).fetchone()
         if row is None:
             raise Refusal(f"setting {setting_id!r} does not exist", "add it first with add-setting")
