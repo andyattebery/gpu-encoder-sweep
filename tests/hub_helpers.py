@@ -19,8 +19,8 @@ def authored_tables(store):
     return {t: [tuple(r.values()) for r in store.rows(t)] for t, tg in store.tags.items() if tg["class"] == "FILE"}
 
 
-def client_for(store, token=None):
-    return TestClient(create_app(store, FakeQueue(), token=token))
+def client_for(store, token=None, agent_tokens=None, share=None, frames=None, queue=None):
+    return TestClient(create_app(store, queue or FakeQueue(), token=token, agent_tokens=agent_tokens, share=share, frames=frames))
 
 
 def post(client, path, body):

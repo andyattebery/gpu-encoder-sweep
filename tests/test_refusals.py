@@ -74,7 +74,9 @@ class FieldNames(unittest.TestCase):
         checked = 0
         for path, ops in spec["paths"].items():
             for op in ops.values():
-                if "catalogue" in op.get("tags", []) or "requestBody" not in op:
+                # the catalogue is where a device or a root is authored once; the agents' bodies are observations (a title's
+                # height, a frame count), not free inputs -- ARCHITECTURE's rule names both routers
+                if "catalogue" in op.get("tags", []) or "agents" in op.get("tags", []) or "requestBody" not in op:
                     continue
                 names = self.properties(op["requestBody"]["content"]["application/json"]["schema"], schemas)
                 self.assertFalse(names & self.RESERVED, f"{path}: {names & self.RESERVED}")

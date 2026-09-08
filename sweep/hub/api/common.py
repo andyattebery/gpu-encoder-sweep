@@ -23,7 +23,4 @@ def verb_name(request: Request):
 OK = {"ok": True}
 
 
-def stamp():
-    """The hub's clock, for every event it writes: one clock orders a run's log (x_run_state_disagrees_with_events reads max(at))."""
-    import datetime as dt
-    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="microseconds")
+from sweep.hub.store import stamp   # noqa: E402 -- the hub's clock, re-exported for the routers

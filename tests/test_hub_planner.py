@@ -36,7 +36,7 @@ class Planners(unittest.TestCase):
 
     # ---- the small ones
     def test_run_id_is_stage_subject_and_the_utc_stamp(self):
-        self.assertEqual(planner.run_id("encode", SEARCH, NOW), "encode-b580-qsv-av1-20260908T100000Z")
+        self.assertEqual(planner.run_id("encode", SEARCH, NOW), "encode-b580-qsv-av1-20260908T100000000000Z")
 
     def test_default_resolved_fills_the_units_scoped_defaults_not_set_by_identity(self):
         with self.store.reading() as conn:
@@ -53,7 +53,7 @@ class Planners(unittest.TestCase):
         plan, body = self.plan_in(planner.plan_inventory, "media-01", "movies", [{"title_id": "x", "path": "/media/Movies/X.mkv"}], NOW)
         self.assertEqual((plan.stage, plan.encoder_unit_id, plan.content_class_id, plan.node_label, plan.artifact, plan.planned_at),
                          ("inventory", None, None, "media-01", "node-encode:0.0.2.dev0+g0", "2026-09-08T10:00:00+00:00"))
-        self.assertEqual(plan.run_id, "inventory-media-01-20260908T100000Z")
+        self.assertEqual(plan.run_id, "inventory-media-01-20260908T100000000000Z")
         self.assertEqual(body["inputs"], [{"title_id": "x", "path": "/media/Movies/X.mkv", "library": "movies"}])
         self.assertEqual(body["run"]["tools"]["ffmpeg"], "/opt/jellyfin-ffmpeg/bin/ffmpeg")
         self.assertEqual(body["run"]["work_root"], "/mnt/data/sweep")

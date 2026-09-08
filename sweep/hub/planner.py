@@ -20,7 +20,8 @@ QUIET_STAGES = frozenset({"time", "split", "concurrency"})
 
 
 def run_id(stage, subject, now):
-    return f"{stage}-{subject}-{now.astimezone(dt.timezone.utc):%Y%m%dT%H%M%SZ}"
+    """<stage>-<subject>-<UTC stamp to the microsecond>: two plans of one kind in one second are two runs."""
+    return f"{stage}-{subject}-{now.astimezone(dt.timezone.utc):%Y%m%dT%H%M%S%fZ}"
 
 
 _new_run_id = run_id      # the planners take run_id as a parameter and stamp new ids through this alias
@@ -391,18 +392,23 @@ def plan_publish(conn, run_id=None, cut_ids=(), via=None):
 
 # ---------------------------------------------------------------- enqueue, done, claim
 
+def busy_on_machine(conn, host, except_run):
+    """Another active run on the host's machine, or None: the quiet-box rule, asked at enqueue and again at claim."""
+    row = conn.execute("SELECT r.run_id, r.state, r.host, h.machine FROM run r JOIN host h ON h.host = r.host "
+                       "WHERE h.machine = (SELECT machine FROM host WHERE host = ?) AND r.state IN ('launched', 'running') AND r.run_id <> ? "
+                       "ORDER BY r.run_id", (host, except_run)).fetchone()
+    return None if row is None else dict(zip(("run_id", "state", "host", "machine"), row))
+
+
 def enqueue(store, queue, plan, body):
     """The plan rows in one checked transaction (a blocked host, an unquiet machine and every other check refuse here), then
     the queue entry; a queue that fails after the commit leaves the run abandoned and visible, never launched unobserved."""
     with store.transaction() as conn:
         st.plan_run(conn, plan)
         if plan.stage in QUIET_STAGES:
-            busy = conn.execute("SELECT r.run_id, r.state, r.host FROM run r JOIN host h ON h.host = r.host "
-                                "WHERE h.machine = (SELECT machine FROM host WHERE host = ?) AND r.state IN ('launched', 'running') AND r.run_id <> ?",
-                                (plan.host, plan.run_id)).fetchone()
+            busy = busy_on_machine(conn, plan.host, plan.run_id)
             if busy is not None:
-                machine = conn.execute("SELECT machine FROM host WHERE host = ?", (plan.host,)).fetchone()[0]
-                raise Refusal(f"machine {machine} is not quiet: {busy[0]} is {busy[1]} on {busy[2]}",
+                raise Refusal(f"machine {busy['machine']} is not quiet: {busy['run_id']} is {busy['state']} on {busy['host']}",
                               "wait for it or abandon it; a timing run runs alone on its machine")
     try:
         return queue.enqueue(plan.host, plan.run_id, body)

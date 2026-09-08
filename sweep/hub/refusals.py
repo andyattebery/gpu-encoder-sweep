@@ -16,6 +16,10 @@ class Refusal(Exception):
         self.what, self.fix = what, fix
 
 
+class Denied(Refusal):
+    """A refusal of the token presented, answered 401: the same form, a different door."""
+
+
 # every named CHECK in sweep/schema.sql -> (what was refused, the fix); test_every_named_constraint_has_a_fix keeps it complete
 CONSTRAINT_FIXES = {
     "setting_generic_has_no_frontend": ("a generic setting that names a frontend, or a frontend's setting that names none",

@@ -15,6 +15,12 @@ from sweep import model_check as mc
 from sweep.hub.refusals import ADD_VERB, Refusal, check_refusal, integrity_refusal
 
 
+def stamp():
+    """The hub's clock for every event it writes: one clock orders a run's log (x_run_state_disagrees_with_events reads max(at))."""
+    import datetime as dt
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="microseconds")
+
+
 def schema_version(schema):
     return int(hashlib.sha256(schema.encode()).hexdigest()[:7], 16)
 
