@@ -43,5 +43,20 @@ class Dockerfiles(unittest.TestCase):
         self.assertIn("packages: write", text)
 
 
+class Workflows(unittest.TestCase):
+    WORKFLOWS = ("ci", "images")
+
+    def test_setup_uv_is_pinned_by_commit_because_it_publishes_no_major_tag(self):
+        # astral-sh/setup-uv stopped moving a vN tag after v7; `@v10` resolved to nothing and both workflows died at
+        # "Set up job" on the first push of M2 (2026-09-08). Its README pins the commit with the version beside it.
+        for name in self.WORKFLOWS:
+            text = (ROOT / ".github" / "workflows" / f"{name}.yaml").read_text()
+            uses = [l.strip() for l in text.splitlines() if "astral-sh/setup-uv" in l]
+            with self.subTest(workflow=name):
+                self.assertTrue(uses, f"{name}.yaml does not set up uv")
+                for line in uses:
+                    self.assertRegex(line, r"^- uses: astral-sh/setup-uv@[0-9a-f]{40} # v\d+\.\d+\.\d+$", line)
+
+
 if __name__ == "__main__":
     unittest.main()
