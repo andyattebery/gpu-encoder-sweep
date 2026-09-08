@@ -372,6 +372,10 @@ INSERT INTO run (run_id, encoder_unit_id, content_class_id, search_id, host, nod
 INSERT INTO run (run_id, parent_run_id, encoder_unit_id, content_class_id, search_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha,
                  scorer_build, ffvship_version, metric_backend, harness_version, started_at, finished_at) VALUES
  ('b580-qsv-av1-score','b580-qsv-av1','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr','b580-qsv-av1','media-01-score','media-01-score','score','node-score:0.0.2.dev0+g0','8.1.2-Jellyfin','0b0ea2d','FFVship 1.3 + 8.1.2-0b0ea2d','1.3','libvmaf_cuda','g0','2026-09-03T02:30','2026-09-03T06:00');
+-- a run with no search is scored at the one height its class's served lanes share: the viewing's kept encodes, scored on the same scorer
+INSERT INTO run (run_id, parent_run_id, encoder_unit_id, content_class_id, search_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha,
+                 scorer_build, ffvship_version, metric_backend, harness_version, started_at, finished_at) VALUES
+ ('b580-viewing-score','b580-viewing','intel-b580-ihd26.2.2-qsv-av1','native-1080p-sdr',NULL,'media-01-score','media-01-score','score','node-score:0.0.2.dev0+g0','8.1.2-Jellyfin','0b0ea2d','FFVship 1.3 + 8.1.2-0b0ea2d','1.3','libvmaf_cuda','g0','2026-09-04T11:00','2026-09-04T11:30');
 -- HEADROOM 0.98 is the fixture's stand-in: the incumbent request factor, which overshoots and is unmeasured
 INSERT INTO constant_value VALUES
  ('HEADROOM','m4-calibrate',0.98,'2026-08-28'),('BOUND','m4-calibrate',20,'2026-08-28'),
@@ -388,6 +392,7 @@ INSERT INTO run_window SELECT 'b580-qsv-av1-time', window_id FROM content_class_
 INSERT INTO run_window VALUES ('b580-qsv-av1-screen','tng');
 INSERT INTO run_window SELECT 'b580-qsv-av1-locate', window_id FROM content_class_member WHERE content_class_id = 'native-1080p-sdr';
 INSERT INTO run_window VALUES ('b580-viewing','tng');
+INSERT INTO run_window SELECT 'b580-viewing-score', window_id FROM run_window WHERE run_id = 'b580-viewing';
 
 -- two locate cells on the coarse ladder
 INSERT INTO cell VALUES ('l-a24-tng','b580-qsv-av1-locate','tng','reference'),('l-a30-tng','b580-qsv-av1-locate','tng','reference');
@@ -481,6 +486,11 @@ INSERT INTO cell_setting VALUES ('g-a','qsv.preset','4','identity'),('g-a','qsv.
  ('g-b','qsv.preset','4','identity'),('g-b','qsv.b_strategy','0','identity'),('g-b','qsv.q','34','identity'),
  ('g-i','qsv.preset','1','identity'),('g-i','qsv.b_strategy','1','identity'),('g-i','qsv.q','30','identity');
 INSERT INTO encode VALUES ('g-a',52000000,6900.0,1439,60.0,'hardware',1),('g-b',44000000,5900.0,1439,60.0,'hardware',1),('g-i',36000000,4800.0,1439,60.0,'hardware',1);
+-- scored at 1548, the served lane's height, under the viewing's own score run; the encodes stay kept for the viewing
+INSERT INTO score VALUES
+ ('b580-viewing-score','g-a',1548,'ssimulacra2','mean',80.0,'S1','FFVship 1.3 + 8.1.2-0b0ea2d'),
+ ('b580-viewing-score','g-b',1548,'ssimulacra2','mean',78.0,'S1','FFVship 1.3 + 8.1.2-0b0ea2d'),
+ ('b580-viewing-score','g-i',1548,'ssimulacra2','mean',80.0,'S1','FFVship 1.3 + 8.1.2-0b0ea2d');
 INSERT INTO viewing_verdict VALUES (1,'pair',NULL,'tng','g-a','g-b','iPad M4 13in','andy','same','not worth the size','2026-09-04');
 -- an acceptance too, of the incumbent's own encode: the viewing the incumbent arm names, and a positive instance of BOTH kinds for the discarded-encode check
 INSERT INTO viewing_verdict VALUES (2,'acceptance','m4-ipad-le1080p-sdr','tng','g-i',NULL,'iPad M4 13in','andy','acceptable','what ships today, at q 30, is acceptable for the lane','2026-09-04');
@@ -746,6 +756,8 @@ def run_checks(conn, tags):
 # ---------------------------------------------------------------- negative cases: each must be CAUGHT
 
 MUTATIONS = [
+    ("a search-less run scored at another height", "UPDATE score SET height = 1080 WHERE run_id = 'b580-viewing-score'",
+     "x_score_height_not_a_served_lanes"),
     ("a published encode with no encode record", "DELETE FROM encode WHERE cell_key = 'c-b36-tng'; "
      "INSERT INTO published VALUES ('runs/b580-qsv-av1/enc/c-b36-tng.mkv','b580-qsv-av1','c-b36-tng',NULL,'media-01',1,'sha','2026-09-03')",
      "x_published_without_encode"),

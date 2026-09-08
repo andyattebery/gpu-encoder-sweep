@@ -1236,3 +1236,11 @@ CREATE VIEW x_run_artifact_not_reported AS
 CREATE VIEW x_published_without_encode AS
   SELECT p.path FROM published p WHERE p.cell_key IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM encode e WHERE e.cell_key = p.cell_key);
+
+-- @check a score under a run with no search at a height that is not a served lane's -- the height is a decision; a search-less run inherits the one its lanes share
+-- @fix score at the class's served lane's score_height; when the class serves lanes at two heights, author-search to name one
+CREATE VIEW x_score_height_not_a_served_lanes AS
+  SELECT sc.run_id, sc.cell_key, sc.height FROM score sc JOIN run r ON r.run_id = sc.run_id
+   WHERE r.search_id IS NULL
+     AND NOT EXISTS (SELECT 1 FROM content_class_lane cl JOIN lane l ON l.lane = cl.lane
+                      WHERE cl.content_class_id = r.content_class_id AND l.score_height = sc.height);

@@ -171,9 +171,9 @@ NEVER_OVERWRITTEN = "a record is never overwritten; abandon the run and re-plan"
 
 def ingest_record(conn, run_id, record):
     st.require(conn, "run", run_id=run_id)
-    run = dict(zip(("run_id", "stage", "parent_run_id", "search_id", "host", "encoder_unit_id", "scorer_build"),
-                   conn.execute("SELECT run_id, stage, parent_run_id, search_id, host, encoder_unit_id, scorer_build FROM run WHERE run_id = ?",
-                                (run_id,)).fetchone()))
+    run = dict(zip(("run_id", "stage", "parent_run_id", "search_id", "content_class_id", "host", "encoder_unit_id", "scorer_build"),
+                   conn.execute("SELECT run_id, stage, parent_run_id, search_id, content_class_id, host, encoder_unit_id, scorer_build "
+                                "FROM run WHERE run_id = ?", (run_id,)).fetchone()))
     stages = STAGES_FOR_KIND[record.kind]
     if run["stage"] not in stages:
         raise Refusal(f"{_an(record.kind)} {record.kind} record under {_an(run['stage'])} {run['stage']} run",
@@ -218,12 +218,9 @@ def _ingest_failure(conn, run, r):
 
 def _ingest_score(conn, run, r):
     _planned(conn, run, r.cell_key)
-    if run["search_id"] is None:
-        raise Refusal(f"score run {run['run_id']!r} has no search to take the height from",
-                      "score runs are planned from a search's encoding run; the height is the search's")
     if run["scorer_build"] is None:
         raise Refusal(f"score run {run['run_id']!r} names no scorer build", "plan a score run with the scorer's build, from the artifact the agent reports")
-    (height,) = conn.execute("SELECT score_height FROM search WHERE search_id = ?", (run["search_id"],)).fetchone()
+    height = score_height(conn, run)
     want = {(height, s.metric, s.statistic, s.value, r.recipe, run["scorer_build"]) for s in r.scores}
     existing = set(conn.execute("SELECT height, metric, statistic, value, recipe, scorer_build FROM score WHERE run_id = ? AND cell_key = ?",
                                 (run["run_id"], r.cell_key)).fetchall())
@@ -237,6 +234,21 @@ def _ingest_score(conn, run, r):
     for step in r.steps:
         st.insert(conn, "step_trace", dict(run_id=run["run_id"], cell_key=r.cell_key, height=height, **step.model_dump()))
     conn.execute("UPDATE encode SET kept = ? WHERE cell_key = ?", (int(r.kept), r.cell_key))
+
+
+def score_height(conn, run):
+    """The height a run's scores are read at: the search's, or, for a run with no search, the one height its class's
+    served lanes share (I2b: every lane scores at its device's panel height); two heights need a search to choose."""
+    if run["search_id"] is not None:
+        (height,) = conn.execute("SELECT score_height FROM search WHERE search_id = ?", (run["search_id"],)).fetchone()
+        return height
+    heights = [h for (h,) in conn.execute("SELECT DISTINCT l.score_height FROM content_class_lane cl JOIN lane l ON l.lane = cl.lane "
+                                          "WHERE cl.content_class_id = ? ORDER BY l.score_height", (run["content_class_id"],))]
+    if len(heights) != 1:
+        listed = ", ".join(str(h) for h in heights) or "none"
+        raise Refusal(f"run {run['run_id']!r} has no search and its class serves lanes at heights {listed}",
+                      "author-search to name the height, or score a run of a search")
+    return heights[0]
 
 
 def _ingest_timing(conn, run, r):

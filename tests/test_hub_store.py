@@ -153,7 +153,7 @@ class Transactions(unittest.TestCase):
         self.store.conn.execute("DELETE FROM scorer")
         firing = self.store.check()
         self.assertEqual(list(firing), ["x_score_run_host_without_scorer"])
-        self.assertEqual(firing["x_score_run_host_without_scorer"], [("b580-qsv-av1-score", "media-01-score")])
+        self.assertEqual(set(firing["x_score_run_host_without_scorer"]), {("b580-qsv-av1-score", "media-01-score"), ("b580-viewing-score", "media-01-score")})
 
     def test_require_refuses_a_missing_reference_by_name(self):
         with self.store.reading() as conn:

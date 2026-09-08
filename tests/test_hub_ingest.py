@@ -107,13 +107,25 @@ class Ingest(unittest.TestCase):
         self.post("r2-score", self.SCORE)
         self.assertEqual(self.rows("encode", cell_key="c-new")[0]["kept"], 0)
 
-    def test_score_run_without_a_search_is_refused(self):
+    def screen_score_run(self):
         self.plan("r2-screen", "screen", search=None, cells=(store.CellPlan("s2-a", "tng", "reference", (("qsv.preset", "1", "identity"), ("qsv.q", "30", "identity"))),))
         self.post("r2-screen", dict(ENCODE, cell_key="s2-a", kept=False))
         self.plan("r2-screen-score", "score", host="media-01-score", pins=SCORER, unit=None, cc=None, search=None, windows=(), parent_run_id="r2-screen",
                   scorer_build="b", ffvship_version="1.3", metric_backend="libvmaf_cuda")
+
+    def test_score_height_comes_from_the_served_lane(self):
+        # a run with no search is scored at the one height its class's served lanes share: the m4 lane's 1548
+        self.screen_score_run()
+        self.post("r2-screen-score", dict(self.SCORE, cell_key="s2-a"))
+        self.assertEqual({s["height"] for s in self.rows("score", cell_key="s2-a")}, {1548})
+        self.assertEqual(self.store.check(), {})
+
+    def test_two_served_heights_are_refused(self):
+        # the class now serves a kids lane too, at 1250: no single height, so a search must name one
+        self.screen_score_run()
+        self.store.conn.execute("INSERT INTO content_class_lane VALUES ('native-1080p-sdr', 'kids-ipad-standard-sdr')")
         self.refused("r2-screen-score", dict(self.SCORE, cell_key="s2-a"),
-                     "REFUSING: score run 'r2-screen-score' has no search to take the height from -- score runs are planned from a search's encoding run; the height is the search's")
+                     "REFUSING: run 'r2-screen-score' has no search and its class serves lanes at heights 1250, 1548 -- author-search to name the height, or score a run of a search")
 
     def test_score_record_reposted_identically_is_a_noop_and_differing_is_refused(self):
         self.score_run()
