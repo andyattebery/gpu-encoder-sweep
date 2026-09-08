@@ -5,7 +5,7 @@
 # python via uv and the package's node extra. The base is ubuntu26.04 because FFVship v5.1.0 needs libavutil >= 7
 # (ubuntu 24.04 ships 6.1.1 and the build fails after the nvcc work). ARCH=all: docker build has no GPU to detect, and
 # the fat binary covers Ampere and Blackwell alike (the archived ffvship/Dockerfile.cuda).
-FROM nvidia/cuda:13.3.1-devel-ubuntu26.04 AS build
+FROM --platform=linux/amd64 nvidia/cuda:13.3.1-devel-ubuntu26.04 AS build
 ARG VSHIP_TAG=v5.1.0
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git make pkg-config g++ libffms2-dev libavutil-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -13,7 +13,7 @@ WORKDIR /src
 RUN git clone --depth 1 --branch "${VSHIP_TAG}" https://codeberg.org/Line-fr/Vship.git .
 RUN make build BACKEND=Cuda ARCH=all && make buildFFVSHIP
 
-FROM nvidia/cuda:13.3.1-runtime-ubuntu26.04@sha256:71b55b93449973f2ee6d8024d6dd34853d338a1f007fe07adaaf9a35fd591794
+FROM --platform=linux/amd64 nvidia/cuda:13.3.1-runtime-ubuntu26.04@sha256:71b55b93449973f2ee6d8024d6dd34853d338a1f007fe07adaaf9a35fd591794
 RUN apt-get update && apt-get install -y --no-install-recommends libffms2-5 ca-certificates curl xz-utils && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/FFVship /usr/local/bin/FFVship
 COPY --from=build /src/libvship.so /usr/local/lib/libvship.so

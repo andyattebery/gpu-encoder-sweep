@@ -25,7 +25,7 @@ class Dockerfiles(unittest.TestCase):
         for name in self.FILES:
             text = (ROOT / "docker" / f"Dockerfile.{name}").read_text()
             with self.subTest(image=name):
-                froms = [l.split()[1] for l in text.splitlines() if l.startswith("FROM ")]
+                froms = [[t for t in l.split()[1:] if not t.startswith("--")][0] for l in text.splitlines() if l.startswith("FROM ")]
                 self.assertTrue(froms)
                 for ref in froms:
                     self.assertNotIn(":latest", ref, ref)
