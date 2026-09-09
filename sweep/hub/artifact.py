@@ -13,7 +13,7 @@ from sweep.hub.refusals import Refusal
 
 
 class Identity(NamedTuple):
-    artifact: str               # <flavour>:<version>: node-encode:0.0.3.dev2+gabc1234, node-score:..., uvx:..., hub:...
+    artifact: str               # <flavour>:<version>: node-encode:0.0.3.dev2+gabc1234, node-encode-mesarc:..., node-score:..., uvx:..., hub:...
     harness_version: str        # the git sha, or the tag when the version is a clean tag
     ffmpeg_build: str           # the -version string
     ffmpeg_sha: str             # sha256 of the binary, computed where it runs

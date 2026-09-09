@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1
+# The encode node on htpc-01: the same Tdarr node image node-encode pins, rebuilt with a fresh Mesa, so the
+# VAAPI driver and Mesa the harness measures are that box's own (rig parity), plus the linux64 portable
+# jellyfin-ffmpeg at a pinned release, python via uv, and the package's node extra. Below the FROM block this
+# file is Dockerfile.node-encode: the two move together, and a change to one belongs in both.
+#
+# ghcr.io/andyattebery/tdarr-node-mesa-fresh:mesarc resolved to this digest on 2026-09-08. Its own base is
+# ghcr.io/haveagitgat/tdarr_node:2.86.01@sha256:7542459a... -- the digest node-encode pins -- with Mesa replaced from
+# ppa:ernstp/mesarc: it shares all 15 of that image's layers and adds 3, and its ENV, entrypoint and (absent) CMD are
+# identical -- only its OCI labels differ. The role must pin the same image, and a bump here is deliberate twice over:
+# a different driver package under the same tag has invalidated a whole lane before, and mesarc is a channel, so its
+# tag moves. linux/amd64 by intent: the node is x86-64, the base publishes amd64 only, and the portable ffmpeg is the
+# linux64 build.
+FROM --platform=linux/amd64 ghcr.io/andyattebery/tdarr-node-mesa-fresh@sha256:8c83a89cf36a4d585cf92fcca83f983a48018f5598dffa068d820bfd9c82fda2
+# v8.1.2-3 was the release current while the B580 lane's committed values were made (2026-08-20 .. 09-04); M3 checks
+# it against the ledgers' ffmpeg sha before the acceptance run and bumps deliberately if they disagree.
+ARG JELLYFIN_FFMPEG_TAG=v8.1.2-3+nvenc-n13.0.19.1
+ARG JELLYFIN_FFMPEG_ASSET=jellyfin-ffmpeg_8.1.2-3-nvenc-n13.0.19.1_portable_linux64-gpl.tar.xz
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl xz-utils python3 && rm -rf /var/lib/apt/lists/*
+# This image exists for one package version, and the apt layer above ran against the base's sources, the Mesa
+# PPA among them. The base's pin should hold it; assert that it did rather than trust it, because a check that
+# never fires is not a check. These are the base's own two assertions, repeated on top of our layer.
+ARG MESA_VERSION=26.2.2+git2609021820.0ae52750c0c~n~mesarc0
+RUN set -eu; \
+    got="$(dpkg-query -W -f='${Version}' mesa-libgallium)"; \
+    [ "$got" = "$MESA_VERSION" ] || { echo "FATAL: mesa-libgallium is $got, expected $MESA_VERSION"; exit 1; }; \
+    test -e /usr/lib/x86_64-linux-gnu/dri/radeonsi_drv_video.so || { echo "FATAL: radeonsi_drv_video.so missing or dangling"; exit 1; }
+RUN mkdir -p /opt/jellyfin-ffmpeg/bin \
+    && curl -fsSL "https://github.com/andyattebery/jellyfin-ffmpeg/releases/download/${JELLYFIN_FFMPEG_TAG}/${JELLYFIN_FFMPEG_ASSET}" | tar -xJ -C /opt/jellyfin-ffmpeg/bin \
+    && /opt/jellyfin-ffmpeg/bin/ffmpeg -version > /dev/null      # no pipe: a pipe would hide a binary that cannot load
+COPY --from=ghcr.io/astral-sh/uv:0.12.10 /uv /uvx /bin/
+ARG SETUPTOOLS_SCM_PRETEND_VERSION=0+unbuilt
+ARG SWEEP_ARTIFACT=node-encode-mesarc:0+unbuilt
+ARG SWEEP_HARNESS_SHA=unknown
+# the base's own python3 (>= 3.11 satisfies the lock); no interpreter download, which under emulation fetches the wrong architecture
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${SETUPTOOLS_SCM_PRETEND_VERSION} UV_PYTHON_DOWNLOADS=never UV_PYTHON=/usr/bin/python3
+WORKDIR /app
+COPY pyproject.toml uv.lock README.md ./
+COPY sweep ./sweep
+RUN uv sync --locked --extra node --no-dev --no-editable
+RUN printf '%s\n%s\n' "$SWEEP_ARTIFACT" "$SWEEP_HARNESS_SHA" > /etc/sweep-artifact
+ENV PATH="/app/.venv/bin:${PATH}" NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+ENTRYPOINT ["sweep-node", "serve"]
+CMD []

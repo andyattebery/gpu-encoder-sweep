@@ -19,7 +19,7 @@ class Version(unittest.TestCase):
 
 
 class Dockerfiles(unittest.TestCase):
-    FILES = ("hub", "node-encode", "node-score")
+    FILES = ("hub", "node-encode", "node-encode-mesarc", "node-score")
 
     def test_every_base_is_pinned_and_the_package_comes_from_the_lock(self):
         for name in self.FILES:
@@ -34,7 +34,7 @@ class Dockerfiles(unittest.TestCase):
                 self.assertIn("/etc/sweep-artifact", text)
                 self.assertNotIn(":latest", text.replace("tdarr_node:latest resolved", ""))    # the comment may say where the digest came from
 
-    def test_the_images_workflow_builds_all_three_and_pins_its_actions(self):
+    def test_the_images_workflow_builds_every_image_and_pins_its_actions(self):
         text = (ROOT / ".github" / "workflows" / "images.yaml").read_text()
         for name in self.FILES:
             self.assertIn(name, text)

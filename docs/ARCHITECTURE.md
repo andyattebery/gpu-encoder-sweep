@@ -9,13 +9,13 @@ dates, no history live here.
 ### The shape
 
 ```
-laptop                       nas-01 (always on)                       GHCR              nodes
-  sweep CLI ── REST/TLS ──►  hub: FastAPI + SQLite (the record)        hub image          media-01: encode + score containers
-  (thin: calls, prints)        checks on every write · planner ·       node-encode        htpc-01:  encode container (podman)
-  campaign repo ◄─ export ─   builder · ingest · analysis · render     node-score         eta:      native encode agent (pyz)
-  record/                      Redis behind it: queue · heartbeats                        eta-wsl:  score container
-                               share (pool path, bind-mounted):        CI builds and       agents: long-poll /claim, pull inputs
-                               temp/harness/{runs,refsets}             pushes on tags      from the share, post records + events
+laptop                       nas-01 (always on)                       GHCR                nodes
+  sweep CLI ── REST/TLS ──►  hub: FastAPI + SQLite (the record)        hub image            media-01: encode + score containers
+  (thin: calls, prints)        checks on every write · planner ·       node-encode          htpc-01:  encode container (podman)
+  campaign repo ◄─ export ─   builder · ingest · analysis · render     node-encode-mesarc   eta:      native encode agent (pyz)
+  record/                      Redis behind it: queue · heartbeats     node-score           eta-wsl:  score container
+                               share (pool path, bind-mounted):        CI builds and         agents: long-poll /claim, pull inputs
+                               temp/harness/{runs,refsets}             pushes on tags        from the share, post records + events
 ```
 
 - **The hub's database is the record.** Every write goes through the API, and the API refuses a
@@ -46,21 +46,22 @@ laptop                       nas-01 (always on)                       GHCR      
 | image | base | adds | runs on |
 |---|---|---|---|
 | `ghcr.io/andyattebery/gpu-encoder-sweep-hub` | `python:<pinned>-slim` | the package with its `hub` extra (`fastapi`, `uvicorn`, `redis`), installed by uv from the lock file | nas-01 |
-| `…-node-encode` | `ghcr.io/haveagitgat/tdarr_node:<the tag the tdarr role pins>` — production's image, so the VAAPI driver and Mesa are production's | python3; the agent; the linux64 portable jellyfin-ffmpeg from `github.com/andyattebery/jellyfin-ffmpeg` releases at a pinned tag | media-01, htpc-01 |
+| `…-node-encode` | `ghcr.io/haveagitgat/tdarr_node:<the tag the tdarr role pins>` — production's image, so the VAAPI driver and Mesa are production's | python3; the agent; the linux64 portable jellyfin-ffmpeg from `github.com/andyattebery/jellyfin-ffmpeg` releases at a pinned tag | media-01 |
+| `…-node-encode-mesarc` | `ghcr.io/andyattebery/tdarr-node-mesa-fresh:mesarc` by digest — the same tdarr layer as `node-encode` (it shares all 15 of its parent's layers) with Mesa from `ppa:ernstp/mesarc`, which is the VAAPI driver htpc-01 encodes with | everything `node-encode` adds, plus a build-time assertion that the apt layer left `mesa-libgallium` and `radeonsi_drv_video.so` alone | htpc-01 |
 | `…-node-score` | `nvidia/cuda:13.3.1-runtime-ubuntu26.04` (FFVship needs libavutil ≥ 7, per `ffvship/Dockerfile.cuda`) | FFVship and `libvship.so` from a build stage at Vship v5.1.0 (from Codeberg, the source; GitHub is a stale mirror) — **the version the committed values were scored with, pinned on purpose**: a newer tag is a new `scorer_build`, which the acceptance comparison cannot be run across; the same jellyfin-ffmpeg build (`libvmaf_cuda`); python3; the agent | media-01, eta-wsl |
 
 The native Windows agent is the same package, run by the boot task as `uvx --from
 "gpu-encoder-sweep[node] @ git+https://github.com/andyattebery/gpu-encoder-sweep@<sha or tag>" sweep-node serve`;
 uv resolves the dependencies and the interpreter, and updating it is the role bumping the ref. The
 package versions itself from git (hatch-vcs: `X.Y.Z` at a tag, `X.Y.Z.devN+g<sha>` past one), and an
-artifact is `<flavour>:<version>` — `node-encode:…`, `node-score:…`, `hub:…` from the stamp CI writes
-into the image, `uvx:…` on eta — with `harness_version` the git sha (or the tag, which names one). An
-agent reports its identity — the artifact, the ffmpeg build, sha and filters, FFVship's version —
-in every heartbeat, and the hub keeps each change as a `host_identity` row. A plan pins the identity
-its host last reported, and the claim hands the run over only while the host still reports that
-artifact (a 409 with the fix otherwise), so a node running code the plan was not built for is
-refused rather than silently measured. The infrastructure repo pins the GHCR tags and the git ref
-its stacks and tasks run.
+artifact is `<flavour>:<version>` — `node-encode:…`, `node-encode-mesarc:…`, `node-score:…`, `hub:…`
+from the stamp CI writes into the image, `uvx:…` on eta — with `harness_version` the git sha (or the
+tag, which names one). An agent reports its identity — the artifact, the ffmpeg build, sha and
+filters, FFVship's version — in every heartbeat, and the hub keeps each change as a `host_identity`
+row. A plan pins the identity its host last reported, and the claim hands the run over only while
+the host still reports that artifact (a 409 with the fix otherwise), so a node running code the plan
+was not built for is refused rather than silently measured. The infrastructure repo pins the GHCR
+tags and the git ref its stacks and tasks run.
 
 ### Schema changes the architecture requires
 
@@ -285,10 +286,10 @@ plan or from the one builder called with the plan's parameters.
 | `sweep/hub/analysis.py` | rank (per window `bd_rate` over the shared range → median, k of n, per stratum), categorise (per decode path, UNMEASURED), invert on `lane.decision_rule` (tightest straddling pair, from `analyze.py:324`), content rate, screen and admissibility verdicts, `derive_ladders` (from `settings_search.py:299 locate_ladders`), calibrate (BOUND from `m4_routing.py:57-102`), equivalence, the comparison primitive |
 | `sweep/hub/render.py`, `sweep/hub/legacy.py`, `sweep/hub/export.py` | E1; `import-legacy` and `compare-legacy` (the campaign repo's committed CSVs, uploaded by the CLI); the deterministic export |
 | `sweep/cli/__init__.py` | `sweep`: one subparser per verb (the verb table proven equal to the OpenAPI document, field by field), `httpx` to the hub, prints replies, exits 1 on `REFUSING` and 2 when the hub is unreachable; `export`, `render` write into the campaign repo; run as `uvx --from git+…@<tag> sweep` or `uv tool install` |
-| `sweep/node/{agent,config,identity,ffm,jobs,pool,records}.py` | above; the same package in both node images and, via `uvx`, natively on eta |
+| `sweep/node/{agent,config,identity,ffm,jobs,pool,records}.py` | above; the same package in all three node images and, via `uvx`, natively on eta |
 | `sweep/schema.sql`, `sweep/model_check.py` | unchanged in role: the schema is the source, the proof and the doc rendering stay |
-| `docker/Dockerfile.hub`, `docker/Dockerfile.node-encode`, `docker/Dockerfile.node-score` | the images above; `uv.lock` is the only place third-party packages are pinned, and every image installs from it |
-| `.github/workflows/ci.yaml`, `images.yaml` | tests + `model_check --mutate` + docs `--check` + integration against a Redis service; build and push the three images to GHCR on main and tags (the FFVship CUDA build stage cached), each stamped with the checkout's version and sha; `docker/README.md` says what a role gives a container |
+| `docker/Dockerfile.hub`, `docker/Dockerfile.node-encode`, `docker/Dockerfile.node-encode-mesarc`, `docker/Dockerfile.node-score` | the images above; `uv.lock` is the only place third-party packages are pinned, and every image installs from it |
+| `.github/workflows/ci.yaml`, `images.yaml` | tests + `model_check --mutate` + docs `--check` + integration against a Redis service; build and push the four images to GHCR on main and tags (the FFVship CUDA build stage cached), each stamped with the checkout's version and sha; `docker/README.md` says what a role gives a container |
 
 Lifted verbatim from the archived harness, cited at the call site: `parse_progress` (`sweep.py:1013`), `nearest_rank`
 (`:1065`), `parse_ffvship_json` (`:1083`), `rescale_lossless` (`:1879`), `libvmaf_graph`/`score_libvmaf`

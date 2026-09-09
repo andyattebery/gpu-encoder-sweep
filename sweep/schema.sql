@@ -645,7 +645,7 @@ CREATE TABLE constant_value (                               -- a measured consta
 CREATE TABLE host_identity (                                -- what the agent on a host reported: the artifact it runs and the tools it carries; a plan pins the latest
   host            TEXT NOT NULL REFERENCES host,
   reported_at     TEXT NOT NULL,
-  artifact        TEXT NOT NULL,                            -- node-encode:<version> | node-score:<version> | uvx:<version>; the version carries the git sha
+  artifact        TEXT NOT NULL,                            -- node-encode[-mesarc]:<version> | node-score:<version> | uvx:<version>; the version carries the git sha
   harness_version TEXT NOT NULL,                            -- the git sha, or the tag when the version is a clean tag
   ffmpeg_build    TEXT NOT NULL,                            -- the -version string: 8.1.2-Jellyfin
   ffmpeg_sha      TEXT NOT NULL,                            -- sha256 of the binary, computed where it runs

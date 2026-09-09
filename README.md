@@ -17,6 +17,6 @@ a transcode flow runs.
 
 Status: M2 — the schema and its proof, the hub (every authoring and mechanical verb, ingest, the
 Redis queue, the agent endpoints, export), the CLI, the node agent (proven end to end in-process with
-fake tools, and on a real Redis under `make integration`) and the three images are here; the
+fake tools, and on a real Redis under `make integration`) and the four images are here; the
 two-cell smoke on real hardware waits on the infrastructure roles. The acceptance run (M3) follows.
 The images vendor jellyfin-ffmpeg (GPL) and FFVship, which keep their own licences.

@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        image: [hub, node-encode, node-score]
+        image: [hub, node-encode, node-encode-mesarc, node-score]
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
