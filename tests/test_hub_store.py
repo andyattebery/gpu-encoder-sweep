@@ -176,6 +176,31 @@ class Transactions(unittest.TestCase):
                 "viewer": "andy", "verdict": "same", "viewed_at": "2026-09-05"}, "viewing_id")
         self.assertEqual(vid, 3)
 
+    def test_update_writes_only_the_named_columns(self):
+        (before,) = [r for r in self.store.rows("host") if r["host"] == "media-01"]
+        with self.store.transaction() as conn:
+            store.update(conn, "host", {"host": "media-01"}, {"notes": "the A4000 box"})
+        (after,) = [r for r in self.store.rows("host") if r["host"] == "media-01"]
+        self.assertEqual(after["notes"], "the A4000 box")
+        self.assertEqual({k: v for k, v in after.items() if k != "notes"}, {k: v for k, v in before.items() if k != "notes"})
+
+    def test_delete_removes_by_key(self):
+        with self.store.transaction() as conn:
+            store.insert(conn, "canonical_concept", {"canonical_id": "lookahead", "description": "frames of lookahead"})
+        with self.store.transaction() as conn:
+            store.delete(conn, "canonical_concept", {"canonical_id": "lookahead"})
+        self.assertNotIn("lookahead", [r["canonical_id"] for r in self.store.rows("canonical_concept")])
+
+    def test_trial_runs_the_checks_and_rolls_back(self):
+        with self.store.trial() as conn:                              # a clean body still leaves nothing behind
+            store.insert(conn, "canonical_concept", {"canonical_id": "lookahead", "description": "frames of lookahead"})
+        self.assertNotIn("lookahead", [r["canonical_id"] for r in self.store.rows("canonical_concept")])
+        with self.assertRaises(Refusal) as cm:                        # and it refuses what a transaction would refuse
+            with self.store.trial() as conn:
+                conn.execute("DELETE FROM scorer")
+        self.assertTrue(cm.exception.what.startswith("x_score_run_host_without_scorer: "))
+        self.assertEqual(len(self.store.rows("scorer")), 1)
+
 
 class PlansEventsAndCalibration(unittest.TestCase):
     def setUp(self):

@@ -50,8 +50,8 @@ class Store:
         self.conn.close()
 
     @contextmanager
-    def transaction(self):
-        """One write: BEGIN IMMEDIATE, the body, every check; a firing check or an integrity error rolls back and refuses."""
+    def _write(self, commit):
+        """BEGIN IMMEDIATE, the body, every check; a firing check or an integrity error rolls back and refuses."""
         with self.lock:
             self.conn.execute("BEGIN IMMEDIATE")
             try:
@@ -67,7 +67,16 @@ class Store:
             except BaseException:
                 self.conn.execute("ROLLBACK")
                 raise
-            self.conn.execute("COMMIT")
+            self.conn.execute("COMMIT" if commit else "ROLLBACK")
+
+    def transaction(self):
+        """One write: the body and every check, committed together."""
+        return self._write(commit=True)
+
+    def trial(self):
+        """The same write and the same checks, always rolled back: what `apply --dry-run` answers with. A refusal
+        reaches the caller exactly as it would have; what does not refuse leaves no trace."""
+        return self._write(commit=False)
 
     @contextmanager
     def reading(self):
@@ -107,6 +116,19 @@ def require(conn, table, **key):
 def insert(conn, table, row):
     cols = [_ident(c) for c in row]
     conn.execute(f"INSERT INTO {_ident(table)} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", tuple(row.values()))
+
+
+def update(conn, table, key, row):
+    """The named columns of one row, by key; a column the caller does not name is not touched."""
+    sets = ", ".join(f"{_ident(c)} = ?" for c in row)
+    where = " AND ".join(f"{_ident(k)} = ?" for k in key)
+    conn.execute(f"UPDATE {_ident(table)} SET {sets} WHERE {where}", (*row.values(), *key.values()))
+
+
+def delete(conn, table, key):
+    """One row, by key. A row something references refuses through SQLite's own foreign key."""
+    where = " AND ".join(f"{_ident(k)} = ?" for k in key)
+    conn.execute(f"DELETE FROM {_ident(table)} WHERE {where}", tuple(key.values()))
 
 
 def insert_returning_id(conn, table, row, id_column):
