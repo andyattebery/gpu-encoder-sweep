@@ -3,6 +3,7 @@ import json
 
 from fastapi import APIRouter, Depends
 
+from sweep.hub import fleet
 from sweep.hub import store as st
 from sweep.hub.api.common import OK, Body, get_store
 from sweep.hub.refusals import Refusal
@@ -276,3 +277,24 @@ def unblock_host(body: UnblockHost, store=Depends(get_store)):
         st.require(conn, "host", host=body.host)
         conn.execute("UPDATE host SET blocked = NULL WHERE host = ?", (body.host,))
     return OK
+
+
+class ApplyFleet(Body):
+    """The fleet as one document. The row models are the single-row verbs' own, so the document and `add-host`,
+    `add-unit` and `add-scorer` cannot drift apart. A group left out is not managed by this document; an explicit
+    empty list says there are none of that kind, and removes them."""
+    hosts: list[AddHost] | None = None
+    units: list[AddUnit] | None = None
+    scorers: list[AddScorer] | None = None
+    dry_run: bool = False
+
+
+@router.post("/apply")
+def apply(body: ApplyFleet, store=Depends(get_store)):
+    """The whole fleet in one checked transaction: what is missing is created, what differs is updated, what the
+    document does not carry is removed, and what already agrees is counted. A field a measurement rests on refuses
+    rather than changing under it. A dry run does the same work and the same checks, then rolls back."""
+    doc = body.model_dump(exclude={"dry_run"})
+    with (store.trial() if body.dry_run else store.transaction()) as conn:
+        plan = fleet.apply(conn, doc)
+    return dict(plan, applied=not body.dry_run)

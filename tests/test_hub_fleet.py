@@ -5,13 +5,14 @@ diff against the store.
     python3 -m unittest tests.test_hub_fleet
 """
 import copy
-import json
 import unittest
 
+from sweep import model_check as mc
 from sweep.hub import fleet
+from sweep.hub.api import catalogue
 from sweep.hub.refusals import Refusal
 from sweep.hub.store import Store
-from tests.hub_helpers import fixture_store
+from tests.hub_helpers import fixture_store, fleet_document
 
 B580, A4000, TI5060 = "intel-b580-ihd26.2.2-qsv-av1", "nvidia-a4000-595-nvenc-hevc", "nvidia-5060ti-595-nvenc-av1"
 
@@ -58,25 +59,12 @@ class Freezing(unittest.TestCase):
         self.assertEqual(fleet.referrers(self.conn, "scorer", {"host": "eta-wsl"}), {})
 
 
-def document_of(store):
-    """The fixture's own fleet, in the document's shape: re-applying it must be a no-op."""
-    units = {u["encoder_unit_id"]: u for u in store.rows("encoder_unit")}
-    return {
-        "hosts": [{k: r[k] for k in fleet.COLUMNS["host"]} for r in store.rows("host")],
-        "units": [dict({k: units[p["encoder_unit_id"]][k] for k in fleet.COLUMNS["encoder_unit"]},
-                       host=p["host"], device=p["device"]) for p in store.rows("host_unit")],
-        "scorers": [dict({k: r[k] for k in ("host", "metric_backend", "gpu_id", "cache_dir")},
-                         ffvship=json.loads(r["ffvship"]), score_ffmpeg=json.loads(r["score_ffmpeg"]))
-                    for r in store.rows("scorer")],
-    }
-
-
 class Diff(unittest.TestCase):
     def setUp(self):
         self.store = fixture_store()
         self.addCleanup(self.store.close)
         self.conn = self.store.conn
-        self.doc = document_of(self.store)
+        self.doc = fleet_document(self.store)
 
     def test_the_fixtures_own_rows_re_applied_are_unchanged(self):
         d = fleet.diff(self.conn, self.doc)
@@ -126,6 +114,26 @@ class Diff(unittest.TestCase):
             fleet.diff(self.conn, self.doc)
         self.assertIn(A4000, cm.exception.what)
         self.assertIn("driver", cm.exception.what)
+
+
+class ColumnsAreThePinnedSet(unittest.TestCase):
+    def test_the_document_carries_what_the_single_row_verbs_carry(self):
+        # ApplyFleet reuses these models, so a field added to one of them without a column here would be accepted by
+        # the API and then silently dropped on the way to the table
+        self.assertEqual(set(catalogue.AddHost.model_fields), set(fleet.COLUMNS["host"]))
+        self.assertEqual(set(catalogue.AddUnit.model_fields), set(fleet.COLUMNS["encoder_unit"]) | set(fleet.COLUMNS["host_unit"]))
+        self.assertEqual(set(catalogue.AddScorer.model_fields), set(fleet.COLUMNS["scorer"]))
+
+    def test_every_column_of_every_fleet_table_is_managed_or_deliberately_not(self):
+        # a column added to the schema lands here and the decision gets taken; until it does it is unmanaged, which
+        # is the safe direction but not one to arrive at by accident
+        store = fixture_store()
+        self.addCleanup(store.close)
+        unmanaged = {("host", "blocked")}                  # operational state: block-host and unblock-host own it
+        for table, cols in fleet.COLUMNS.items():
+            with self.subTest(table=table):
+                self.assertEqual(set(cols) | {c for t, c in unmanaged if t == table},
+                                 {c["name"] for c in mc.columns(store.conn, table)})
 
 
 FLEET = {
@@ -199,7 +207,7 @@ class ApplyAgainstMeasurements(unittest.TestCase):
     def setUp(self):
         self.store = fixture_store()
         self.addCleanup(self.store.close)
-        self.doc = document_of(self.store)
+        self.doc = fleet_document(self.store)
 
     def apply(self, doc):
         with self.store.transaction() as conn:

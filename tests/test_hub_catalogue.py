@@ -7,9 +7,9 @@ the schema or a check makes reaches the client as REFUSING.
 import json
 import unittest
 
-from sweep.hub import refusals
+from sweep.hub import fleet, refusals
 from sweep.hub.store import Store
-from tests.hub_helpers import client_for, fixture_store, post
+from tests.hub_helpers import client_for, fixture_store, fleet_document, post
 
 B580, A4000 = "intel-b580-ihd26.2.2-qsv-av1", "nvidia-a4000-595-nvenc-hevc"
 
@@ -278,3 +278,58 @@ class Catalogue(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ApplyTheFleet(unittest.TestCase):
+    """POST /catalogue/apply: the whole fleet as one document, in one checked transaction."""
+
+    def setUp(self):
+        self.store = fixture_store()
+        self.addCleanup(self.store.close)
+        self.client = client_for(self.store)
+        self.doc = fleet_document(self.store)
+
+    def apply(self, doc, **extra):
+        return post(self.client, "/catalogue/apply", dict(doc, **extra))
+
+    def host(self, name):
+        (h,) = [h for h in self.doc["hosts"] if h["host"] == name]
+        return h
+
+    def test_the_stores_own_fleet_is_a_no_op_and_says_so(self):
+        status, text = self.apply(self.doc)
+        self.assertEqual(status, 200, text)
+        plan = json.loads(text)
+        self.assertEqual((plan["applied"], plan["unchanged"]), (True, 10))
+        self.assertEqual(plan["created"], {"hosts": [], "units": [], "scorers": []})
+
+    def test_a_dry_run_reports_the_plan_and_writes_nothing(self):
+        was = self.host("htpc-01")["notes"]
+        self.host("htpc-01")["notes"] = "the 9070 XT box"
+        status, text = self.apply(self.doc, dry_run=True)
+        self.assertEqual(status, 200, text)
+        plan = json.loads(text)
+        self.assertEqual(plan["applied"], False)
+        self.assertEqual(plan["updated"]["hosts"], [{"name": "htpc-01", "fields": {"notes": [was, "the 9070 XT box"]}}])
+        self.assertEqual([h["notes"] for h in self.store.rows("host") if h["host"] == "htpc-01"], [was])
+
+    def test_the_same_document_applied_writes_it(self):
+        self.host("htpc-01")["notes"] = "the 9070 XT box"
+        self.assertEqual(self.apply(self.doc)[0], 200)
+        self.assertEqual([h["notes"] for h in self.store.rows("host") if h["host"] == "htpc-01"], ["the 9070 XT box"])
+
+    def test_a_frozen_field_is_refused_with_the_fix_and_a_dry_run_refuses_the_same_way(self):
+        self.host("media-01")["work_root"] = "/mnt/data/gpu-encoder-sweep"
+        for dry in (True, False):
+            with self.subTest(dry_run=dry):
+                status, text = self.apply(self.doc, dry_run=dry)
+                self.assertEqual(status, 422, text)
+                self.assertTrue(text.startswith("REFUSING: host 'media-01' work_root differs "), text)
+                self.assertTrue(text.endswith(" -- " + fleet.FROZEN_FIX["host"]), text)
+
+    def test_an_unknown_field_in_the_document_is_refused(self):
+        self.host("htpc-01")["work_roots"] = "/typo"
+        status, text = self.apply(self.doc)
+        self.assertEqual(status, 422, text)
+        self.assertTrue(text.startswith("REFUSING: "), text)
+        self.assertIn("work_roots", text)

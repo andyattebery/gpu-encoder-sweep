@@ -1,4 +1,6 @@
 """Helpers for the hub's tests. Not a test module: nothing here is named in the Makefile."""
+import json
+
 from fastapi.testclient import TestClient
 
 from sweep import model_check as mc
@@ -27,3 +29,17 @@ def post(client, path, body):
     """(status, text) of a POST; a refusal's text starts REFUSING, an ok reply is compact JSON."""
     r = client.post(path, json=body)
     return r.status_code, r.text
+
+
+def fleet_document(store):
+    """The store's own fleet in the document's shape -- what `apply` must treat as a no-op."""
+    from sweep.hub import fleet
+    units = {u["encoder_unit_id"]: u for u in store.rows("encoder_unit")}
+    return {
+        "hosts": [{k: r[k] for k in fleet.COLUMNS["host"]} for r in store.rows("host")],
+        "units": [dict({k: units[p["encoder_unit_id"]][k] for k in fleet.COLUMNS["encoder_unit"]},
+                       host=p["host"], device=p["device"]) for p in store.rows("host_unit")],
+        "scorers": [dict({k: r[k] for k in ("host", "metric_backend", "gpu_id", "cache_dir")},
+                         ffvship=json.loads(r["ffvship"]), score_ffmpeg=json.loads(r["score_ffmpeg"]))
+                    for r in store.rows("scorer")],
+    }

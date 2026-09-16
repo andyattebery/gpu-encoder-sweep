@@ -56,6 +56,7 @@ def get(path):
 
 
 VERBS = OrderedDict([
+    ("apply", verb("/catalogue/apply", ("hosts", jsonarg), ("units", jsonarg), ("scorers", jsonarg), ("dry_run", B))),
     ("add-host", verb("/catalogue/add-host", "host", "ssh_host", "os", "machine", "work_root", "share_root", "ffmpeg", "local_view", "notes")),
     ("add-unit", verb("/catalogue/add-unit", "encoder_unit_id", "vendor", "card", "driver", "frontend", "codec", "host", "device")),
     ("add-concept", verb("/catalogue/add-concept", "canonical_id", "description")),
