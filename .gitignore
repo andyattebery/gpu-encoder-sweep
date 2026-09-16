@@ -11,3 +11,10 @@ dist/
 
 # the agents' tokens, read by the hub from SWEEP_AGENT_TOKENS: never committed
 agent-tokens.json
+
+# agent working notes, never published. Anchored with a leading slash: unanchored, `tasks/`
+# would match a directory of that name at ANY depth.
+/handoffs/
+/plans/
+/status/
+/tasks/
