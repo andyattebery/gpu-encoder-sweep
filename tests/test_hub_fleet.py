@@ -4,11 +4,13 @@ diff against the store.
 
     python3 -m unittest tests.test_hub_fleet
 """
+import copy
 import json
 import unittest
 
 from sweep.hub import fleet
 from sweep.hub.refusals import Refusal
+from sweep.hub.store import Store
 from tests.hub_helpers import fixture_store
 
 B580, A4000, TI5060 = "intel-b580-ihd26.2.2-qsv-av1", "nvidia-a4000-595-nvenc-hevc", "nvidia-5060ti-595-nvenc-av1"
@@ -124,6 +126,136 @@ class Diff(unittest.TestCase):
             fleet.diff(self.conn, self.doc)
         self.assertIn(A4000, cm.exception.what)
         self.assertIn("driver", cm.exception.what)
+
+
+FLEET = {
+    "hosts": [
+        {"host": "nas-01", "ssh_host": "nas-01", "os": "linux", "machine": "nas-01",
+         "work_root": "/data", "share_root": "/share", "ffmpeg": None, "local_view": None, "notes": None},
+        {"host": "box", "ssh_host": "box", "os": "linux", "machine": "box",
+         "work_root": "/w", "share_root": "/share", "ffmpeg": "/ff/ffmpeg", "local_view": None, "notes": None},
+    ],
+    "units": [
+        {"encoder_unit_id": A4000, "vendor": "nvidia", "card": "NVIDIA RTX A4000", "driver": "595",
+         "frontend": "nvenc", "codec": "hevc", "host": "box", "device": "0000:01:00.0"},
+    ],
+    "scorers": [
+        {"host": "box", "ffvship": ["/usr/local/bin/FFVship"], "score_ffmpeg": ["/ff/ffmpeg"],
+         "metric_backend": "libvmaf_cuda", "gpu_id": 0, "cache_dir": "/w/cache"},
+    ],
+}
+
+
+class ApplyFromNothing(unittest.TestCase):
+    """The day one workflow: a fleet authored into an empty store, then corrected."""
+
+    def setUp(self):
+        self.store = Store()
+        self.addCleanup(self.store.close)
+
+    def apply(self, doc):
+        with self.store.transaction() as conn:
+            return fleet.apply(conn, doc)
+
+    def test_a_fleet_is_created_from_nothing_and_applying_it_again_changes_nothing(self):
+        plan = self.apply(copy.deepcopy(FLEET))
+        self.assertEqual(plan["created"], {"hosts": ["box", "nas-01"], "units": [f"{A4000}@box"], "scorers": ["box"]})
+        self.assertEqual([r["host"] for r in self.store.rows("host")], ["box", "nas-01"])
+        self.assertEqual(self.store.rows("scorer")[0]["ffvship"], '["/usr/local/bin/FFVship"]')
+        self.assertEqual(self.store.rows("host_unit")[0]["device"], "0000:01:00.0")
+        again = self.apply(copy.deepcopy(FLEET))
+        self.assertEqual(again["unchanged"], 4)
+        self.assertEqual((again["created"], again["updated"], again["removed"]),
+                         ({"hosts": [], "units": [], "scorers": []},) * 3)
+
+    def test_a_corrected_field_updates_while_nothing_has_run(self):
+        self.apply(copy.deepcopy(FLEET))
+        doc = copy.deepcopy(FLEET)
+        doc["hosts"][1]["work_root"] = "/w/gpu-encoder-sweep"
+        plan = self.apply(doc)
+        self.assertEqual(plan["updated"]["hosts"], [{"name": "box", "fields": {"work_root": ["/w", "/w/gpu-encoder-sweep"]}}])
+        self.assertEqual([r["work_root"] for r in self.store.rows("host") if r["host"] == "box"], ["/w/gpu-encoder-sweep"])
+
+    def test_a_removed_placement_takes_its_orphaned_unit_with_it(self):
+        self.apply(copy.deepcopy(FLEET))
+        doc = copy.deepcopy(FLEET)
+        doc["units"] = []
+        plan = self.apply(doc)
+        self.assertEqual(plan["removed"]["units"], [f"{A4000}@box"])
+        self.assertEqual(self.store.rows("host_unit"), [])
+        self.assertEqual(self.store.rows("encoder_unit"), [])        # nothing places it any more
+
+    def test_a_host_nobody_declares_is_refused_for_the_scorer_that_names_it(self):
+        doc = copy.deepcopy(FLEET)
+        doc["scorers"][0]["host"] = "ghost"
+        with self.assertRaises(Refusal) as cm:
+            self.apply(doc)
+        self.assertEqual(str(cm.exception), "REFUSING: host host='ghost' does not exist -- add it first with add-host")
+
+
+class ApplyAgainstMeasurements(unittest.TestCase):
+    """The fixture has run things: what may still change, and what may not."""
+
+    def setUp(self):
+        self.store = fixture_store()
+        self.addCleanup(self.store.close)
+        self.doc = document_of(self.store)
+
+    def apply(self, doc):
+        with self.store.transaction() as conn:
+            return fleet.apply(conn, doc)
+
+    def host(self, name):
+        (h,) = [h for h in self.doc["hosts"] if h["host"] == name]
+        return h
+
+    def test_a_frozen_field_refuses_naming_the_field_both_values_and_what_holds_it(self):
+        self.host("media-01")["work_root"] = "/mnt/data/gpu-encoder-sweep"
+        with self.assertRaises(Refusal) as cm:
+            self.apply(self.doc)
+        self.assertRegex(str(cm.exception), r"^REFUSING: .+ -- .+$")
+        for part in ("host 'media-01'", "work_root", "/mnt/data/sweep", "/mnt/data/gpu-encoder-sweep", "run row"):
+            self.assertIn(part, cm.exception.what)
+        self.assertEqual([h["work_root"] for h in self.store.rows("host") if h["host"] == "media-01"], ["/mnt/data/sweep"])
+
+    def test_notes_and_ssh_host_stay_free_on_a_referenced_host(self):
+        self.host("media-01").update(notes="two cards, one box", ssh_host="media-01.lan")
+        plan = self.apply(self.doc)
+        (row,) = [h for h in self.store.rows("host") if h["host"] == "media-01"]
+        self.assertEqual((row["notes"], row["ssh_host"]), ("two cards, one box", "media-01.lan"))
+        self.assertEqual(sorted(plan["updated"]["hosts"][0]["fields"]), ["notes", "ssh_host"])
+
+    def test_removing_a_referenced_host_refuses_naming_what_names_it(self):
+        self.doc["hosts"] = [h for h in self.doc["hosts"] if h["host"] != "media-01"]
+        with self.assertRaises(Refusal) as cm:
+            self.apply(self.doc)
+        self.assertIn("media-01", cm.exception.what)
+        self.assertIn("run row", cm.exception.what)
+        self.assertEqual(len(self.store.rows("host")), 6)
+
+    def test_removing_a_host_whose_only_trace_is_an_identity_takes_the_identity_with_it(self):
+        # eta-wsl has reported and run nothing. The identity is the agent's own report about a row that is going.
+        self.doc["hosts"] = [h for h in self.doc["hosts"] if h["host"] != "eta-wsl"]
+        plan = self.apply(self.doc)
+        self.assertEqual(plan["removed"]["hosts"], ["eta-wsl"])
+        self.assertNotIn("eta-wsl", [h["host"] for h in self.store.rows("host")])
+        self.assertNotIn("eta-wsl", [i["host"] for i in self.store.rows("host_identity")])
+
+    def test_a_unit_identity_change_refuses_whatever_points_at_it(self):
+        (unit,) = [u for u in self.doc["units"] if u["encoder_unit_id"] == B580]
+        unit["driver"] = "ihd26.2.4"
+        with self.assertRaises(Refusal) as cm:
+            self.apply(self.doc)
+        self.assertIn(B580, cm.exception.what)
+        self.assertIn("driver", cm.exception.what)
+
+    def test_a_device_refuses_once_a_run_named_that_placement(self):
+        (unit,) = [u for u in self.doc["units"] if u["encoder_unit_id"] == A4000]
+        unit["device"] = "0000:09:00.0"
+        with self.assertRaises(Refusal) as cm:
+            self.apply(self.doc)
+        self.assertIn("device", cm.exception.what)
+        self.assertIn("run row", cm.exception.what)
 
 
 if __name__ == "__main__":
