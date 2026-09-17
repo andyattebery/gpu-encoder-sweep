@@ -7,6 +7,7 @@ expire, a channel replays what was published until a final payload, a publish jo
 """
 import unittest
 
+from sweep.hub import queue as q_mod
 from sweep.hub.queue import Entry, FakeQueue
 from sweep.hub.refusals import Refusal
 
@@ -14,6 +15,7 @@ from sweep.hub.refusals import Refusal
 class QueueContract:
     """The tests every Queue passes. A subclass gives make_queue(), TTL (seconds a heartbeat lives here) and advance(s)."""
     TTL = 90
+    BLOCK_S = 1          # the Redis subclass raises this past redis-py's own socket timeout, where the case bites
 
     def setUp(self):
         self.q = self.make_queue()
@@ -31,6 +33,12 @@ class QueueContract:
     def test_claim_on_an_empty_queue_returns_none(self):
         self.assertIsNone(self.q.claim("media-01"))
         self.assertIsNone(self.q.claim("media-01", block_s=0))
+
+    def test_a_blocking_claim_on_an_empty_queue_returns_none(self):
+        # the idle agent's normal call, and the case no test made before this one: block_s=0 takes the branch that
+        # asks Redis for no BLOCK at all, so a blocking read was never issued anywhere in the suite while the live
+        # hub answered 500 to every idle poll
+        self.assertIsNone(self.q.claim("media-01", block_s=self.BLOCK_S))
 
     def test_reclaim_returns_the_unacked_entry_first(self):
         first = self.q.enqueue("media-01", "r1", {})
@@ -85,6 +93,32 @@ class QueueContract:
         self.q.publish("r1", {"state": "complete", "final": True})
         self.q.publish("r1", {"state": "after"})                        # never delivered: the channel ended
         self.assertEqual(list(heard), [{"state": "running"}, {"state": "complete", "final": True}])
+
+
+class Blocking(unittest.TestCase):
+    def test_the_socket_timeout_exceeds_the_longest_block_we_ask_for(self):
+        # redis-py's default socket timeout is 5s and a blocking command does not raise it, so BLOCK 30000 gave up
+        # at 5s every time. These two have to stay apart or an expired socket stops meaning "the queue is gone".
+        self.assertGreater(q_mod.SOCKET_TIMEOUT_S, q_mod.BLOCK_CEILING_S)
+
+
+class WhenTheQueueIsGone(unittest.TestCase):
+    """A Redis that does not answer refused nothing before this: grep found no Redis error handling in sweep/hub at
+    all, so a dead queue reached the agent as a 500 and a traceback. Needs no server -- nothing listens on port 1."""
+
+    def test_every_call_refuses_by_name_and_never_quotes_the_url(self):
+        from sweep.hub.queue import RedisQueue
+        q = RedisQueue("redis://127.0.0.1:1/9")
+        calls = {"enqueue": lambda: q.enqueue("media-01", "r1", {}), "claim": lambda: q.claim("media-01"),
+                 "ack": lambda: q.ack("media-01", "1-1"), "pending": lambda: q.pending("media-01"),
+                 "beat": lambda: q.beat("media-01", {}, 90), "pulse": lambda: q.pulse("media-01"),
+                 "publish": lambda: q.publish("r1", {})}
+        for name, call in calls.items():
+            with self.subTest(call=name):
+                with self.assertRaises(Refusal) as cm:
+                    call()
+                self.assertIn("127.0.0.1:1", str(cm.exception))
+                self.assertNotIn("redis://", str(cm.exception))      # a URL can carry a password; host:port cannot
 
 
 class Fake(QueueContract, unittest.TestCase):

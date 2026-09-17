@@ -15,6 +15,13 @@ URL = os.environ.get("SWEEP_TEST_REDIS")
 class Redis(QueueContract, unittest.TestCase):
     TTL = 1     # a real clock: the heartbeat test sleeps past it
 
+    @property
+    def BLOCK_S(self):
+        # past redis-py's own default socket timeout, which is where the blocking claim broke: the socket gave up
+        # before the block did. Read from redis-py rather than typed, so a change to its default keeps the case real.
+        from redis.connection import DEFAULT_SOCKET_TIMEOUT
+        return (DEFAULT_SOCKET_TIMEOUT or 5) + 1
+
     @classmethod
     def setUpClass(cls):
         if not URL:

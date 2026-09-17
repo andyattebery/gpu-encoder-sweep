@@ -6,12 +6,35 @@ with a TTL, and a run's events go out on a pub/sub channel for `watch`. FakeQueu
 with a clock that tests advance, so every hub test runs in-process; tests/integration proves RedisQueue against a real
 Redis under `make integration`. `redis` is imported only when RedisQueue is built, so the cli extra never needs it.
 """
+import functools
 import json
 import time
 from collections import deque
 from typing import Iterator, NamedTuple, Protocol
 
 from sweep.hub.refusals import Refusal
+
+# The longest block the hub ever asks Redis for, and a socket timeout comfortably past it. They must stay apart:
+# redis-py does not lift its socket timeout for the duration of a BLOCK, so a socket that expires while the block is
+# still running is indistinguishable from an idle queue -- which is what made every idle claim a 500.
+BLOCK_CEILING_S = 30
+SOCKET_TIMEOUT_S = 60
+
+
+def answering(fn):
+    """A queue that cannot be reached refuses by name, instead of reaching the agent as a 500 and a traceback.
+
+    On `listen` this covers the subscribe and the first read; a fault during the iteration that follows ends the
+    stream, which is what an SSE reader already handles.
+    """
+    @functools.wraps(fn)
+    def inner(self, *args, **kwargs):
+        try:
+            return fn(self, *args, **kwargs)
+        except (self._redis.ConnectionError, self._redis.TimeoutError) as e:
+            raise Refusal(f"the queue at {self._where} did not answer ({type(e).__name__})",
+                          "the hub hands out and records work through it: check the redis service and the hub's SWEEP_REDIS") from e
+    return inner
 
 
 class Entry(NamedTuple):
@@ -100,8 +123,18 @@ class RedisQueue:
     def __init__(self, url):
         import redis   # the hub extra; the cli never needs it
         self._redis = redis
-        self._r = redis.Redis.from_url(url, decode_responses=True)
+        # redis-py's default socket timeout is 5s and a blocking command does NOT raise it for the duration of its
+        # BLOCK, so `claim(block_s=30)` gave up on the socket at 5s and answered 500 to every idle poll. The socket
+        # timeout has to outlast the longest block we ask for; then an expired socket means the queue is gone, which
+        # is a different thing and refuses as one.
+        self._r = redis.Redis.from_url(url, decode_responses=True, socket_timeout=SOCKET_TIMEOUT_S)
         self._groups = set()
+
+    @property
+    def _where(self):
+        """host:port for a refusal -- never the URL, which can carry a password."""
+        kw = self._r.connection_pool.connection_kwargs
+        return kw.get("path") or f"{kw.get('host')}:{kw.get('port')}"
 
     # ---- keys
     @staticmethod
@@ -124,11 +157,13 @@ class RedisQueue:
         return Entry(entry_id, host, body["run_id"], body["plan"], body.get("kind", "run"))
 
     # ---- the contract
+    @answering
     def enqueue(self, host, run_id, plan, kind="run"):
         stream = self._stream(host)
         self._group(stream)
         return self._r.xadd(stream, {"entry": json.dumps({"run_id": run_id, "kind": kind, "plan": plan})}, maxlen=1000, approximate=True)
 
+    @answering
     def claim(self, host, block_s=0):
         stream = self._stream(host)
         group = self._group(stream)
@@ -137,13 +172,14 @@ class RedisQueue:
         if claimed:
             entry_id, fields = claimed[0]
             return self._entry(host, entry_id, fields)
-        block = int(block_s * 1000) if block_s else None   # block=0 would wait forever
+        block = int(min(block_s, BLOCK_CEILING_S) * 1000) if block_s else None   # block=0 would wait forever
         read = self._r.xreadgroup(group, host, {stream: ">"}, count=1, block=block)
         for _, entries in read or []:
             for entry_id, fields in entries:
                 return self._entry(host, entry_id, fields)
         return None
 
+    @answering
     def ack(self, host, entry_id):
         stream = self._stream(host)
         group = self._group(stream)
@@ -153,20 +189,25 @@ class RedisQueue:
         self._r.xack(stream, group, entry_id)
         self._r.xdel(stream, entry_id)
 
+    @answering
     def pending(self, host):
         stream = self._stream(host)
         return [self._entry(host, entry_id, fields) for entry_id, fields in self._r.xrange(stream)]
 
+    @answering
     def beat(self, host, payload, ttl_s):
         self._r.set(f"harness:heartbeat:{host}", json.dumps(payload), ex=int(ttl_s))
 
+    @answering
     def pulse(self, host):
         text = self._r.get(f"harness:heartbeat:{host}")
         return None if text is None else json.loads(text)
 
+    @answering
     def publish(self, channel, payload):
         self._r.publish(f"harness:events:{channel}", json.dumps(payload))
 
+    @answering
     def listen(self, channel, timeout_s):
         pubsub = self._r.pubsub()
         pubsub.subscribe(f"harness:events:{channel}")
