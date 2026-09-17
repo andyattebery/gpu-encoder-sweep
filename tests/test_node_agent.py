@@ -6,9 +6,11 @@ a publish job puts files on the share with a sha both ends.
 
     python3 -m unittest tests.test_node_agent
 """
+import contextlib
 import gzip
 import json
 import os
+import io
 import pathlib
 import unittest
 from unittest import mock
@@ -150,6 +152,39 @@ class EndToEnd(unittest.TestCase):
         fresh.start()
         self.assertEqual(fresh.serve_once(), run_id)
         self.assertEqual((self.p.run_row(run_id)["state"], fresh.cells_run, fresh.reposted), ("complete", 1, 1))
+
+
+class AToolItCannotRead(unittest.TestCase):
+    """A scorer whose FFVship prints something new must not crashloop: it registers, reports a null, and score
+    planning refuses by name. One unparseable line used to restart the container forever and register nothing."""
+
+    def setUp(self):
+        self.p = hub_and_agent()
+
+    def test_the_agent_starts_reports_a_null_and_says_what_it_could_not_read(self):
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"FAKE_FFVSHIP_VERSION": "Vship, but rewritten"}), contextlib.redirect_stdout(out):
+            scorer = self.p.agent("sco")
+            scorer.start()
+        self.assertIsNone(scorer.identity["ffvship_version"])
+        self.assertIn("FFVship", out.getvalue())
+        self.assertIn("Vship, but rewritten", out.getvalue())     # the output it could not read, so the fix is visible
+        (row,) = [i for i in self.p.store.rows("host_identity") if i["host"] == "sco"]
+        self.assertIsNone(row["ffvship_version"])
+
+    def test_and_planning_a_score_run_then_refuses_by_name(self):
+        make_sample(self.p)
+        with mock.patch.dict(os.environ, {"FAKE_FFVSHIP_VERSION": "Vship, but rewritten"}), contextlib.redirect_stdout(io.StringIO()):
+            self.p.agent("sco").start()
+        run_id = json.loads(post(self.p.client, "/runs/encode", {
+            "content_class_id": CLASS, "encoder_unit_id": UNIT, "host": "enc", "stage": "viewing",
+            "cells": [{"window_id": "tng", "settings": {"qsv.q": "24", "qsv.preset": "4", "qsv.b_strategy": "-1"}}]})[1])["run_id"]
+        encoder = self.p.agent("enc")
+        encoder.start()
+        self.assertEqual(encoder.serve_once(), run_id)          # a kept encode to score, so the refusal is the one meant
+        status, text = post(self.p.client, "/runs/score", {"run_id": run_id})
+        self.assertEqual(status, 422, text)
+        self.assertTrue(text.startswith("REFUSING: the identity reports no FFVship "), text)
 
 
 if __name__ == "__main__":
