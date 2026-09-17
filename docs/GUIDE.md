@@ -425,6 +425,21 @@ claim time and a run stuck at `planned` usually means this output disagrees with
 two subcommands are `sweep-node serve`, the loop a role runs at boot, and `sweep-node hash PATHS`,
 which prints the content hash and frame count of a file — the same hash the harness keys cuts by.
 
+**A `null` in that output is a real answer, not a failure to start.** If the agent cannot read a
+tool's version it reports the field as null and says so in its log, rather than exiting — an agent
+that exits tells you nothing at all, because it never registers. A scorer whose `ffvship_version` is
+null appears in `sweep status` like any other agent and refuses at the point it would matter:
+
+```
+$ sweep score --run-id viewing-…
+REFUSING: the identity reports no FFVship -- score on a host whose agent reports one: the node-score image
+```
+
+**And if the hub cannot reach its queue**, every verb that needs it says so by name rather than
+failing with a 500: `REFUSING: the queue at redis:6379 did not answer (ConnectionError) -- the hub
+hands out and records work through it: check the redis service and the hub's SWEEP_REDIS`. An agent
+logs that and retries; nothing is lost.
+
 **A killed agent resumes.** Nothing needs doing: its heartbeat expires, the hub posts the run
 `failed` with the count it reached and keeps the queue entry; when the agent comes back it claims the
 same entry, is told which cells already have records, and encodes only the rest.
