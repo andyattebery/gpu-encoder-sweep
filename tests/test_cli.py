@@ -8,6 +8,7 @@ import contextlib
 import io
 import json
 import pathlib
+import re
 import tempfile
 import unittest
 
@@ -113,6 +114,26 @@ class VerbsMatchTheApp(unittest.TestCase):
             with self.subTest(verb=name):
                 self.assertEqual([f for f, _ in verb.flags], expected[(verb.method, verb.path)])
                 self.assertEqual(list(verb.params), [p[1:-1] for p in verb.path.split("/") if p.startswith("{")])
+
+    def test_the_guide_names_every_verb_and_invokes_none_that_is_gone(self):
+        """docs/GUIDE.md is the how-to, and this keeps its verb LIST from falling behind the CLI in either direction:
+        a new endpoint cannot land without a line there, and a renamed one cannot leave a stale invocation behind.
+
+        It holds the list and nothing else. The guide's prose can still go stale and the guide says so itself.
+
+        Coverage counts any mention -- in a command or in backticks. The other direction counts only INVOCATIONS a
+        reader could copy and run: `sweep <verb>` at the start of a line, after a `$ ` prompt, or opening a backticked
+        span, with any global options between. Mid-sentence prose is not an invocation ("a ladder sweep across arms"
+        is English, not a command), and backticked words alone are not either -- `host`, `check` and `time` are
+        ordinary words. `sweep-node` has its own subcommands and is excluded by the space required after `sweep`.
+        """
+        text = (pathlib.Path(__file__).resolve().parent.parent / "docs" / "GUIDE.md").read_text()
+        invoked = set(re.findall(r"(?:^|\$ |`)sweep(?:\s+--[a-z-]+\s+\S+)*\s+([a-z][a-z-]*)", text, re.M))
+        mentioned = invoked | set(re.findall(r"`([a-z][a-z-]*)`", text))
+        missing = set(cli.VERBS) - mentioned
+        gone = invoked - set(cli.VERBS)
+        self.assertFalse(missing, f"docs/GUIDE.md names no {sorted(missing)}")
+        self.assertFalse(gone, f"docs/GUIDE.md invokes {sorted(gone)}, which the CLI does not have")
 
     def test_help_lists_every_verb(self):
         out = io.StringIO()

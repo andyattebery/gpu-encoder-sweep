@@ -7,6 +7,7 @@ a transcode flow runs.
 
 | doc | what it answers |
 |---|---|
+| `docs/GUIDE.md` | how to drive it: the verbs in the order you would use them, from an empty hub to measurements you can read |
 | `docs/SPEC.md` | the process: invariants, stages 0–11 with what each reads, writes, decides and refuses, and the recipes |
 | `docs/DATA-MODEL.md` | the model: the two keys, the sample, the schema (rendered from `sweep/schema.sql`), the checks |
 | `docs/ARCHITECTURE.md` | how it is built: the hub service, the agents, the queue, the exchange, the images, deployment |

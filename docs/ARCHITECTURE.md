@@ -90,6 +90,9 @@ refusal.
 
 ### The verbs — `sweep <verb>`, each an endpoint
 
+`docs/GUIDE.md` is the how-to — the verbs in the order an operator uses them, with real replies. This
+section is the contract they implement.
+
 The CLI is thin: one subcommand per verb, a typed request, the reply printed. Every refusal is an
 HTTP 422 whose body starts `REFUSING: <what> -- <fix>`; the CLI prints it and exits 1. Every
 authoring endpoint applies its change in a transaction, runs every check and rolls back on a firing
