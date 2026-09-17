@@ -7,14 +7,17 @@ the hub's text is printed as is, and the exit code says refused (1), ok (0) or u
 import contextlib
 import io
 import json
+import os
 import pathlib
 import re
+import stat
 import tempfile
 import unittest
 
 import httpx
 
 from sweep import cli
+from sweep.cli import config as cliconfig
 from sweep.hub.app import create_app
 from sweep.hub.store import Store
 
@@ -31,6 +34,59 @@ def run(argv, handler):
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         rc = cli.main(["--hub", "http://hub.test"] + argv, transport=httpx.MockTransport(respond))
     return rc, out.getvalue(), err.getvalue(), seen
+
+
+def config_file(text, mode=0o600, name="env"):
+    """A config file with a chosen mode, and an env that points at it."""
+    d = pathlib.Path(tempfile.mkdtemp())
+    p = d / name
+    p.write_text(text)
+    p.chmod(mode)
+    return p, {"SWEEP_CONFIG": str(p)}
+
+
+class ConfigFile(unittest.TestCase):
+    """sweep/cli/config.py: where the hub and the token are kept when the environment does not carry them."""
+
+    def test_the_file_supplies_hub_and_token_when_the_environment_does_not(self):
+        _, env = config_file("SWEEP_HUB=https://hub.example\nSWEEP_TOKEN=s3cret\n")
+        self.assertEqual(cliconfig.read(env), {"SWEEP_HUB": "https://hub.example", "SWEEP_TOKEN": "s3cret"})
+
+    def test_comments_blank_lines_export_and_quotes_are_handled(self):
+        _, env = config_file("""# the hub
+
+export SWEEP_HUB="https://hub.example"
+  SWEEP_TOKEN = 's3cret'   
+""")
+        self.assertEqual(cliconfig.read(env), {"SWEEP_HUB": "https://hub.example", "SWEEP_TOKEN": "s3cret"})
+
+    def test_a_group_readable_file_is_refused_with_chmod_as_the_fix(self):
+        p, env = config_file("SWEEP_HUB=https://hub.example\n", mode=0o644)
+        with self.assertRaises(SystemExit) as cm:
+            cliconfig.read(env)
+        self.assertRegex(str(cm.exception), r"^REFUSING: .+ -- .+$")
+        self.assertIn(str(p), str(cm.exception))
+        self.assertIn(f"chmod 600 {p}", str(cm.exception))
+
+    def test_an_unrecognised_key_is_refused_by_name(self):
+        _, env = config_file("SWEEP_TOKN=s3cret\n")
+        with self.assertRaises(SystemExit) as cm:
+            cliconfig.read(env)
+        self.assertIn("SWEEP_TOKN", str(cm.exception))
+        self.assertIn("SWEEP_HUB", str(cm.exception))          # the fix names what is allowed
+
+    def test_sweep_config_naming_a_missing_file_is_refused_but_a_missing_default_is_not(self):
+        missing = pathlib.Path(tempfile.mkdtemp()) / "nope"
+        with self.assertRaises(SystemExit) as cm:
+            cliconfig.read({"SWEEP_CONFIG": str(missing)})
+        self.assertIn(str(missing), str(cm.exception))
+        self.assertEqual(cliconfig.read({"HOME": tempfile.mkdtemp()}), {})   # no file, no complaint
+
+    def test_xdg_config_home_is_honoured_and_sweep_config_overrides_it(self):
+        home, xdg = tempfile.mkdtemp(), tempfile.mkdtemp()
+        self.assertEqual(cliconfig.path({"HOME": home}), pathlib.Path(home) / ".config/sweep/env")
+        self.assertEqual(cliconfig.path({"HOME": home, "XDG_CONFIG_HOME": xdg}), pathlib.Path(xdg) / "sweep/env")
+        self.assertEqual(cliconfig.path({"HOME": home, "XDG_CONFIG_HOME": xdg, "SWEEP_CONFIG": "/tmp/x"}), pathlib.Path("/tmp/x"))
 
 
 class Exits(unittest.TestCase):
