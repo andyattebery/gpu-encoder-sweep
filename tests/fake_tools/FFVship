@@ -6,7 +6,12 @@ import sys
 
 argv = sys.argv[1:]
 if "--version" in argv:
-    print("FFVship v5.1.0 (CUDA)")
+    # verbatim from the real binary; tests/test_node_ffm.py pins the same text and asserts the two are equal. A
+    # fake that prints something the tool never printed is why every scorer crashlooped on a green suite.
+    print(os.environ.get("FAKE_FFVSHIP_VERSION", "FFVship 5.1.0-a\n"
+                         "Repository : https://codeberg.org/Line-fr/Vship\n"
+                         "Linked against libvship version 5.1.0\n"
+                         "Cuda version"))
     sys.exit(0)
 frames = int(os.environ.get("FAKE_FRAMES", "1439"))
 metric = argv[argv.index("-m") + 1]

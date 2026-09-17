@@ -138,10 +138,17 @@ def filters_of(filters_stdout):
 
 
 def ffvship_version_of(stdout):
-    for token in stdout.split():
-        if token.startswith("v") and token[1:2].isdigit():
-            return token[1:]
-    raise ParseError(f"not FFVship's --version output: {stdout.strip()[:80]!r}")
+    """FFVship's OWN version, by position: the first line is `FFVship <version>`.
+
+    Not a scan for something version-shaped. The output also carries `Linked against libvship version 5.1.0` -- a
+    different string -- and whichever a scan reached first would end up in run.scorer_build, which is a measured
+    factor and what a scorer_equivalence run compares. The campaign's committed scores record `FFVship 5.1.0-a`,
+    the tool's own, so that is the one that names the scorer.
+    """
+    first = (stdout.strip().splitlines() or [""])[0].split()
+    if len(first) < 2 or first[0] != "FFVship":
+        raise ParseError(f"not FFVship's --version output: {stdout.strip()[:80]!r}")
+    return first[1]
 
 
 def sha256_file(path, buf=8 << 20):

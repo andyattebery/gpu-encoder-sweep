@@ -8,11 +8,22 @@ atomic records never overwritten, a pool that raises the first error in submissi
 import json
 import os
 import pathlib
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
 
 from sweep.node import config as node_config, ffm, identity, pool, records
+
+# FFVship --version, verbatim from the score image on 2026-09-17. Two versions are in it and they are NOT the same
+# string: the tool's own (5.1.0-a) and the library it links (5.1.0). The campaign's committed scores record
+# `FFVship 5.1.0-a` (647 rows, all-gpu-encoder-sweep/data/sweep-score/*.csv), so the tool's own is the scorer's
+# identity, and scorer_build has to keep producing it. tests/fake_tools/FFVship prints this exact text.
+FFVSHIP_5_1_0_A = """FFVship 5.1.0-a
+Repository : https://codeberg.org/Line-fr/Vship
+Linked against libvship version 5.1.0
+Cuda version
+"""
 
 PROGRESS = "frame=100\nfps=0.00\ntotal_size=5000\nout_time_us=4000000\nspeed=2.5x\nprogress=continue\nframe=1439\ntotal_size=60000000\nout_time_us=60000000\nspeed=24.0x\nprogress=end\n"
 
@@ -63,9 +74,27 @@ class Tools(unittest.TestCase):
         self.assertEqual(ffm.build_of("ffmpeg version 8.1.2-Jellyfin Copyright (c) 2000-2026 the FFmpeg developers\nbuilt with gcc"), "8.1.2-Jellyfin")
         filters = "Filters:\n  T.. = Timeline support\n TSC scale             V->V       Scale the input video size.\n ... libvmaf_cuda      VV->V      Calculate the VMAF (CUDA).\n"
         self.assertEqual(ffm.filters_of(filters), ["libvmaf_cuda", "scale"])
-        self.assertEqual(ffm.ffvship_version_of("FFVship v5.1.0 (CUDA)\n"), "5.1.0")
         with self.assertRaises(ffm.ParseError):
             ffm.build_of("something else")
+
+    def test_the_ffvship_version_is_the_tools_own_not_the_library_it_links(self):
+        # a scanner for something version-shaped reaches `libvship version 5.1.0` too; the first line's second
+        # token is a position and cannot pick the wrong one
+        self.assertEqual(ffm.ffvship_version_of(FFVSHIP_5_1_0_A), "5.1.0-a")
+        self.assertNotEqual(ffm.ffvship_version_of(FFVSHIP_5_1_0_A), "5.1.0")
+
+    def test_output_that_is_not_ffvships_raises_rather_than_guessing(self):
+        for text in ("ffmpeg version 8.1.2-Jellyfin Copyright (c) 2000-2026\n", "", "5.1.0-a\n"):
+            with self.subTest(text=text[:20]):
+                with self.assertRaises(ffm.ParseError):
+                    ffm.ffvship_version_of(text)
+
+    def test_the_fake_tool_prints_the_pinned_transcript(self):
+        # the fake printed `FFVship v5.1.0 (CUDA)`, which no FFVship has ever printed, and the suite was green on it
+        # while every real scorer crashlooped. The fake is only worth anything if it emits the bytes the tool does.
+        fake = pathlib.Path(__file__).resolve().parent / "fake_tools" / "FFVship"
+        out = subprocess.run([str(fake), "--version"], capture_output=True, text=True, check=True).stdout
+        self.assertEqual(out, FFVSHIP_5_1_0_A)
 
 
 class Records(unittest.TestCase):
