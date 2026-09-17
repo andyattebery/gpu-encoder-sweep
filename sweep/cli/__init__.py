@@ -46,6 +46,9 @@ def jsonarg(text):
 
 S, I, F, B = str, nullable(int), nullable(float), boolean
 
+DEFAULT_HUB = "http://127.0.0.1:8000"
+LOCAL = {}                  # subcommands that reach no endpoint; VERBS is proven equal to the app's OpenAPI document
+
 
 def verb(path, *flags):
     return Verb("POST", path, tuple((f, S) if isinstance(f, str) else f for f in flags))
@@ -100,8 +103,10 @@ VERBS = OrderedDict([
 
 def build_parser():
     ap = argparse.ArgumentParser(prog="sweep", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--hub", default=os.environ.get("SWEEP_HUB", "http://127.0.0.1:8000"))
-    ap.add_argument("--token", default=os.environ.get("SWEEP_TOKEN"))
+    # no default from the environment: main resolves flag -> environment -> file -> localhost, and has to know
+    # which of those each value came from so `sweep config` can report it
+    ap.add_argument("--hub", metavar="URL")
+    ap.add_argument("--token", metavar="TOKEN")
     sub = ap.add_subparsers(dest="verb", required=True, metavar="verb")
     for name, v in VERBS.items():
         p = sub.add_parser(name, help=v.path)
@@ -128,20 +133,42 @@ def body_of(args, v):
     return body
 
 
-def main(argv=None, transport=None):
+def resolve(env, args):
+    """{"hub": (value, where), "token": (value|None, where)} -- the flag, then the environment, then the file."""
+    from sweep.cli import config as cfg
+    saved = cfg.read(env)
+    out = {}
+    for name, key, fallback in (("hub", "SWEEP_HUB", DEFAULT_HUB), ("token", "SWEEP_TOKEN", None)):
+        if getattr(args, name, None):
+            out[name] = (getattr(args, name), "flag")
+        elif env.get(key):
+            out[name] = (env[key], "environment")
+        elif saved.get(key):
+            out[name] = (saved[key], str(cfg.path(env)))
+        else:
+            out[name] = (fallback, "default" if fallback else "unset")
+    return out
+
+
+def main(argv=None, transport=None, env=None):
+    env = os.environ if env is None else env
     args = build_parser().parse_args(argv)
+    where = resolve(env, args)
+    (hub, _), (token, _) = where["hub"], where["token"]
+    if args.verb in LOCAL:
+        return LOCAL[args.verb](env, where, args)
     v = VERBS[args.verb]
-    headers = {"Authorization": f"Bearer {args.token}"} if args.token else {}
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
     path = v.path
     for param in v.params:
         path = path.replace("{" + param + "}", getattr(args, param))
     try:
-        with httpx.Client(base_url=args.hub, headers=headers, transport=transport, timeout=None if args.verb == "watch" else 60.0) as client:
+        with httpx.Client(base_url=hub, headers=headers, transport=transport, timeout=None if args.verb == "watch" else 60.0) as client:
             if args.verb == "watch":
                 return _watch(client, path)
             r = client.request(v.method, path, json=body_of(args, v)) if v.method == "POST" else client.request(v.method, path)
     except httpx.TransportError as e:
-        print(f"sweep: the hub at {args.hub} is unreachable: {e}", file=sys.stderr)
+        print(f"sweep: the hub at {hub} is unreachable: {e}", file=sys.stderr)
         return 2
     if args.verb == "export" and r.status_code == 200 and getattr(args, "into", None):
         from sweep.hub.export import write

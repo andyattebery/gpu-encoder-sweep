@@ -22,7 +22,7 @@ from sweep.hub.app import create_app
 from sweep.hub.store import Store
 
 
-def run(argv, handler):
+def run(argv, handler, env=None, hub=("--hub", "http://hub.test")):
     """(exit code, stdout, stderr, the requests the transport saw) for one CLI invocation against a mock hub."""
     seen = []
 
@@ -32,7 +32,7 @@ def run(argv, handler):
 
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        rc = cli.main(["--hub", "http://hub.test"] + argv, transport=httpx.MockTransport(respond))
+        rc = cli.main(list(hub) + argv, transport=httpx.MockTransport(respond), env=env)
     return rc, out.getvalue(), err.getvalue(), seen
 
 
@@ -87,6 +87,37 @@ export SWEEP_HUB="https://hub.example"
         self.assertEqual(cliconfig.path({"HOME": home}), pathlib.Path(home) / ".config/sweep/env")
         self.assertEqual(cliconfig.path({"HOME": home, "XDG_CONFIG_HOME": xdg}), pathlib.Path(xdg) / "sweep/env")
         self.assertEqual(cliconfig.path({"HOME": home, "XDG_CONFIG_HOME": xdg, "SWEEP_CONFIG": "/tmp/x"}), pathlib.Path("/tmp/x"))
+
+
+class Precedence(unittest.TestCase):
+    """The flag beats the environment beats the file, per value."""
+
+    OK = staticmethod(lambda r: httpx.Response(200, json={"ok": True}))
+
+    def test_the_file_is_used_when_the_environment_has_neither(self):
+        _, env = config_file("SWEEP_HUB=https://from.file\nSWEEP_TOKEN=file-token\n")
+        _, _, _, seen = run(["status"], self.OK, env=env, hub=())
+        self.assertEqual(str(seen[0].url), "https://from.file/runs/status")
+        self.assertEqual(seen[0].headers["authorization"], "Bearer file-token")
+
+    def test_the_environment_beats_the_file(self):
+        _, env = config_file("SWEEP_HUB=https://from.file\nSWEEP_TOKEN=file-token\n")
+        env |= {"SWEEP_HUB": "https://from.env", "SWEEP_TOKEN": "env-token"}
+        _, _, _, seen = run(["status"], self.OK, env=env, hub=())
+        self.assertEqual(str(seen[0].url), "https://from.env/runs/status")
+        self.assertEqual(seen[0].headers["authorization"], "Bearer env-token")
+
+    def test_the_flag_beats_both(self):
+        _, env = config_file("SWEEP_HUB=https://from.file\nSWEEP_TOKEN=file-token\n")
+        env |= {"SWEEP_HUB": "https://from.env", "SWEEP_TOKEN": "env-token"}
+        _, _, _, seen = run(["status"], self.OK, env=env, hub=("--hub", "https://from.flag", "--token", "flag-token"))
+        self.assertEqual(str(seen[0].url), "https://from.flag/runs/status")
+        self.assertEqual(seen[0].headers["authorization"], "Bearer flag-token")
+
+    def test_the_hub_falls_back_to_localhost_and_no_token_sends_no_header(self):
+        _, _, _, seen = run(["status"], self.OK, env={"HOME": tempfile.mkdtemp()}, hub=())
+        self.assertEqual(str(seen[0].url), "http://127.0.0.1:8000/runs/status")
+        self.assertNotIn("authorization", seen[0].headers)
 
 
 class Exits(unittest.TestCase):
