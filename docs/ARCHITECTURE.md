@@ -96,7 +96,12 @@ authoring endpoint applies its change in a transaction, runs every check and rol
 one; every mechanical endpoint refuses while any check fires. The OpenAPI document is the API
 contract, exported to `record/openapi.json`.
 
-**Catalogue** (one endpoint per table group): `add-host` (with `machine`, `share_root`, `work_root`,
+**Catalogue** (one endpoint per table group, and one for the fleet at once): `apply` — the fleet as one
+document (`hosts`, `units`, `scorers`) in one checked transaction: what is missing is created, what differs is
+updated, what the document does not carry is removed, and what already agrees is counted, so re-applying an
+unchanged document is a no-op. A group the document leaves out is not managed by it; an explicit `[]` says
+there are none. `--dry-run` does the same writes and the same checks, then rolls back ·
+`add-host` (with `machine`, `share_root`, `work_root`,
 `local_view`) · `add-unit` (encoder_unit + its `host_unit`: `--host --device` by PCI path; a render
 node is refused by the DDL) · `add-concept` · `add-setting` (+ enum values, roles, per-unit scope) ·
 `add-lane` (+ steps) · `add-constant` (a `measured` constant takes no value; `policy` needs
@@ -161,6 +166,15 @@ write, and a differing existing row is refused.
 ### The control plane — the hub's agent API, Redis behind it, the share beside it
 
 Agents speak REST to the hub and nothing else; the hub is the only Redis client.
+
+**The fleet's own rows are a document, not eleven typed commands.** `sweep apply` takes `catalogue/fleet.json`
+— hosts, units and scorers together — so the file in the campaign repo is the source of truth and the store
+follows it. A row stays editable while nothing measured points at it; once a run, a publish or a reference set
+names it, every column freezes except `notes` and `ssh_host`, and the refusal names the field, both values and
+what holds it. Removal is stricter: a row may not go while anything at all points at it, authored or measured,
+because that would orphan the row that does. What freezes is derived from the schema's `@class ROW` tag rather
+than a list, so a table added later freezes by default; `host_identity` is the one exemption, since an agent
+writes one at its first heartbeat and it describes the agent rather than where its files live.
 
 | endpoint | who | semantics |
 |---|---|---|
@@ -276,6 +290,7 @@ plan or from the one builder called with the plan's parameters.
 | `sweep/hub/api/{catalogue,sample,search,decision,runs,agents,analysis,record}.py` | one router per verb group; typed bodies; every write in a transaction that runs the checks; `runs` holds the mechanical verbs, `agents` (one router, no prefix, the `agents` tag) what an agent speaks |
 | `sweep/hub/auth.py`, `sweep/hub/wait.py` | who is speaking, by token and the route's tag; the hub's loop: the expired heartbeat, the verification at ack |
 | `sweep/hub/store.py` | SQLite from `sweep/schema.sql` (WAL, one writer, the schema pinned by `user_version`); every write one transaction that runs `model_check.run_checks`; `require`, `insert`, `RETURNING` ids, `plan_run`, `post_event`, `calibrate` |
+| `sweep/hub/fleet.py` | the fleet document against the store: the diff, what a measurement freezes, what may be removed; stdlib only |
 | `sweep/hub/ingest.py` | a posted record → rows |
 | `sweep/recipes.py` | pure functions named by recipe: `G1 panel`, `K1 cell_key`, `V1 verdict`, `T1 spread/nstar`, `R1 beats`, `nearest_rank`, `bd_rate` (ported from `analyze.py:140`); shared by hub and node |
 | `sweep/hub/build.py` | the one command builder: encode argv per frontend (from `sweep.py:690 build_encode_args`), production argv from `chain.vf_template`, legs as prefix truncation, cut/probe/rescale/FFVship/libvmaf argv |

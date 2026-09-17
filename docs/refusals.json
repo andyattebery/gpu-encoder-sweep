@@ -37,7 +37,7 @@
      "today": ["sweep.py:1305"],
      "test": "Device selection resolves through by-path and yields the expected vendor id.",
      "disposition": "by_construction",
-     "how": "`host_unit.device` is the only device address; the DDL refuses a render-node number"},
+     "how": "`host_unit.device` is the only device address; the DDL refuses a render-node number, and once a run has named that placement `apply` refuses to edit the address under it -- a new card is a new placement"},
 
     {"id": "id-record-matches-profile",
      "invariant": "A behaviour record written for another node, or carrying a unit outside the profile's silicon, is REFUSED.",
