@@ -24,12 +24,49 @@ share and the agents fit together.
 ```sh
 uv tool install "gpu-encoder-sweep[cli] @ git+https://github.com/andyattebery/gpu-encoder-sweep@<tag>"
 
-export SWEEP_HUB="https://sweep.example"      # else http://127.0.0.1:8000
-export SWEEP_TOKEN="…"                        # the operator's token; agents have their own
+sweep --hub https://sweep.example --token "$TOKEN" config --save
 sweep status
 ```
 
-`--hub` and `--token` override the two variables. Everything else the CLI knows, it asks the hub.
+`config --save` writes the two values to `~/.config/sweep/env` at mode `0600`, and every later command
+reads them from there — so a fresh terminal needs no exports and the token does not go in a shell rc
+file. `XDG_CONFIG_HOME` is honoured, and `$SWEEP_CONFIG` points somewhere else entirely if you keep
+more than one hub. The file is plain `KEY=value` and hand-editable; it can even be `source`d, since a
+leading `export ` is accepted:
+
+```
+# ~/.config/sweep/env, mode 0600
+SWEEP_HUB=https://sweep.example
+SWEEP_TOKEN=…
+```
+
+**Each value resolves in this order: the flag, then the environment, then the file**, with the hub
+falling back to `http://127.0.0.1:8000`. The environment beating the file is what keeps a one-off
+`SWEEP_HUB=… sweep status` working — and the reason `sweep config` reports where each value came
+from rather than only what it is:
+
+```
+$ sweep config
+hub    https://sweep.example      ~/.config/sweep/env
+token  set                        ~/.config/sweep/env
+
+$ SWEEP_HUB=https://other.example sweep config
+hub    https://other.example      environment
+token  set                        ~/.config/sweep/env
+```
+
+If a command is reaching the wrong hub, that second form is how you find the stale export doing it.
+The token is reported as `set` or `unset` and never printed.
+
+**A config file anyone but you can read is refused, not warned about** — it holds a bearer token:
+
+```
+$ sweep config
+REFUSING: ~/.config/sweep/env holds a token and is readable by more than its owner -- chmod 600 ~/.config/sweep/env
+```
+
+`--save` will not quietly fix that, because tightening the file would mean reading it first and a
+file others can read is exactly what must not be read. Run the `chmod`, then save.
 
 **Exit codes.** `0` the hub accepted it · `1` the hub refused it · `2` the hub was unreachable. So
 `sweep … && next-thing` does what you would expect in a script. `sweep watch` is the exception: it
@@ -582,3 +619,7 @@ describes those stages; they do not exist as verbs.
 | `status` | every run, host, queue depth, heartbeat and reported artifact |
 | `check` | the store's own checks: what is wrong right now, if anything |
 | `export` | the whole record as deterministic JSON |
+
+One subcommand is not in that table because it reaches no endpoint: `sweep config`, of §1, which
+reads and writes the file holding your hub and token. Everything else here is one verb, one endpoint,
+and a test proves that list equal to the hub's own OpenAPI document.

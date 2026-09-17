@@ -120,6 +120,64 @@ class Precedence(unittest.TestCase):
         self.assertNotIn("authorization", seen[0].headers)
 
 
+def mode_of(p):
+    return stat.S_IMODE(os.stat(p).st_mode)
+
+
+class ConfigCommand(unittest.TestCase):
+    """`sweep config` shows where each value came from; `--save` writes the file so the mode is not the operator's job."""
+
+    def run_config(self, argv, env, hub=()):
+        return run(["config"] + argv, lambda r: httpx.Response(200, json={}), env=env, hub=hub)
+
+    def test_config_reports_each_value_and_its_source_without_printing_the_token(self):
+        path, env = config_file("SWEEP_HUB=https://from.file\nSWEEP_TOKEN=s3cret-value\n")
+        rc, out, err, seen = self.run_config([], env)
+        self.assertEqual((rc, seen), (0, []))                       # local: it talks to no hub
+        self.assertIn("https://from.file", out)
+        self.assertIn(str(path), out)
+        self.assertIn("set", out)
+        self.assertNotIn("s3cret-value", out + err)                 # the token is never printed
+
+    def test_config_says_unset_when_there_is_no_token(self):
+        rc, out, _, _ = self.run_config([], {"HOME": tempfile.mkdtemp()})
+        self.assertEqual(rc, 0)
+        self.assertIn("unset", out)
+        self.assertIn("http://127.0.0.1:8000", out)
+
+    def test_save_writes_0600_in_a_0700_directory(self):
+        home = tempfile.mkdtemp()
+        env = {"HOME": home}
+        rc, out, _, _ = self.run_config(["--save"], env, hub=("--hub", "https://saved.example", "--token", "s3cret-value"))
+        p = pathlib.Path(home) / ".config/sweep/env"
+        self.assertEqual((rc, p.is_file()), (0, True))
+        self.assertEqual((mode_of(p), mode_of(p.parent)), (0o600, 0o700))
+        self.assertNotIn("s3cret-value", out)
+        self.assertEqual(cliconfig.read(env), {"SWEEP_HUB": "https://saved.example", "SWEEP_TOKEN": "s3cret-value"})
+
+    def test_save_keeps_a_value_that_resolved_from_the_file(self):
+        path, env = config_file("SWEEP_HUB=https://old.example\nSWEEP_TOKEN=kept-token\n")
+        self.run_config(["--save"], env, hub=("--hub", "https://new.example"))
+        self.assertEqual(cliconfig.read(env), {"SWEEP_HUB": "https://new.example", "SWEEP_TOKEN": "kept-token"})
+
+    def test_a_loose_file_refuses_even_on_save_and_chmod_is_the_whole_fix(self):
+        # --save cannot quietly tighten a loose file: it would have to READ it first to keep the values already
+        # there, and a file others can read is exactly what must not be read. chmod, then save.
+        path, env = config_file("SWEEP_HUB=https://hub.example\n", mode=0o644)
+        with self.assertRaises(SystemExit) as cm:
+            self.run_config(["--save"], env, hub=("--hub", "https://hub.example", "--token", "t"))
+        self.assertIn(f"chmod 600 {path}", str(cm.exception))
+        path.chmod(0o600)
+        self.run_config(["--save"], env, hub=("--hub", "https://hub.example", "--token", "t"))
+        self.assertEqual(mode_of(path), 0o600)
+
+    def test_save_with_nothing_to_write_is_refused(self):
+        with self.assertRaises(SystemExit) as cm:
+            self.run_config(["--save"], {"HOME": tempfile.mkdtemp()})
+        self.assertRegex(str(cm.exception), r"^REFUSING: .+ -- .+$")
+        self.assertIn("--token", str(cm.exception))
+
+
 class Exits(unittest.TestCase):
     def test_refusing_body_exits_1_and_prints_it(self):
         rc, out, _, _ = run(["add-host", "--host", "h"], lambda r: httpx.Response(422, text="REFUSING: add-host needs 'os' -- give --os"))
@@ -217,8 +275,9 @@ class VerbsMatchTheApp(unittest.TestCase):
         text = (pathlib.Path(__file__).resolve().parent.parent / "docs" / "GUIDE.md").read_text()
         invoked = set(re.findall(r"(?:^|\$ |`)sweep(?:\s+--[a-z-]+\s+\S+)*\s+([a-z][a-z-]*)", text, re.M))
         mentioned = invoked | set(re.findall(r"`([a-z][a-z-]*)`", text))
-        missing = set(cli.VERBS) - mentioned
-        gone = invoked - set(cli.VERBS)
+        known = set(cli.VERBS) | set(cli.LOCAL)          # LOCAL reaches no endpoint but still has to be documented
+        missing = known - mentioned
+        gone = invoked - known
         self.assertFalse(missing, f"docs/GUIDE.md names no {sorted(missing)}")
         self.assertFalse(gone, f"docs/GUIDE.md invokes {sorted(gone)}, which the CLI does not have")
 

@@ -93,7 +93,9 @@ refusal.
 `docs/GUIDE.md` is the how-to — the verbs in the order an operator uses them, with real replies. This
 section is the contract they implement.
 
-The CLI is thin: one subcommand per verb, a typed request, the reply printed. Every refusal is an
+The CLI is thin: one subcommand per verb, a typed request, the reply printed. The one subcommand that
+reaches no endpoint is `config`, which reads and writes the `0600` file holding the operator's hub and
+token so a shell needs no exports; `--hub`/`--token`, then the environment, then that file. Every refusal is an
 HTTP 422 whose body starts `REFUSING: <what> -- <fix>`; the CLI prints it and exits 1. Every
 authoring endpoint applies its change in a transaction, runs every check and rolls back on a firing
 one; every mechanical endpoint refuses while any check fires. The OpenAPI document is the API

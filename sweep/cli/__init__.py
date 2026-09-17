@@ -15,6 +15,8 @@ from collections import OrderedDict, namedtuple
 
 import httpx
 
+from sweep import model_check as mc
+
 Verb = namedtuple("Verb", "method path flags local params", defaults=((), ()))   # flags: the body's fields in order; local: the CLI's own options; params: the path's
 
 
@@ -108,6 +110,8 @@ def build_parser():
     ap.add_argument("--hub", metavar="URL")
     ap.add_argument("--token", metavar="TOKEN")
     sub = ap.add_subparsers(dest="verb", required=True, metavar="verb")
+    c = sub.add_parser("config", help="show where --hub and --token come from; --save writes them to a 0600 file")
+    c.add_argument("--save", action="store_true", help="write the resolved hub and token to the config file")
     for name, v in VERBS.items():
         p = sub.add_parser(name, help=v.path)
         for name_, help_ in v.local:
@@ -148,6 +152,27 @@ def resolve(env, args):
         else:
             out[name] = (fallback, "default" if fallback else "unset")
     return out
+
+
+def _config(env, where, args):
+    """`sweep config`: what resolved and from where, the token as set/unset. `--save` writes the file at 0600."""
+    from sweep.cli import config as cfg
+    if not args.save:
+        for name in ("hub", "token"):
+            value, source = where[name]
+            shown = value if name == "hub" else ("set" if value else "unset")
+            print(f"{name:<6} {shown or '':<26} {source}")
+        return 0
+    values = {"SWEEP_HUB": where["hub"][0] if where["hub"][1] != "default" else None, "SWEEP_TOKEN": where["token"][0]}
+    if not any(values.values()):
+        raise SystemExit(mc.refusing("there is no hub or token to save",
+                                     "give --hub and --token on this call, or set SWEEP_HUB and SWEEP_TOKEN, then save"))
+    path = cfg.write(env, values)
+    print(f"wrote {path} (0600): {', '.join(k for k in cfg.KEYS if values.get(k))}")
+    return 0
+
+
+LOCAL["config"] = _config
 
 
 def main(argv=None, transport=None, env=None):
