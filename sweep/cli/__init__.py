@@ -2,8 +2,9 @@
 
     sweep [--hub URL] [--token TOKEN] <verb> [--from FILE] [--field value ...]
 
-Exit 0 on an ok reply, 1 on a REFUSING one, 2 when the hub is unreachable. --hub defaults to SWEEP_HUB, then
-http://127.0.0.1:8000; --token to SWEEP_TOKEN. --from FILE reads the body from JSON, and the flags override it.
+Exit 0 on an ok reply, 1 on a REFUSING one, 2 when the hub is unreachable. The hub and the token each resolve from
+the flag, then the environment, then the file `sweep config` keeps them in (the hub falling back to
+http://127.0.0.1:8000). --from FILE reads the body from JSON, and the flags override it.
 The verb table is typed here once more than in the routers, and tests/test_cli.py proves the two equal, verb by
 verb and field by field, against the app's OpenAPI document. Stdlib and httpx only.
 """
@@ -16,6 +17,7 @@ from collections import OrderedDict, namedtuple
 import httpx
 
 from sweep import model_check as mc
+from sweep.cli import config as cfg      # no cycle: config imports model_check and nothing of the CLI
 
 Verb = namedtuple("Verb", "method path flags local params", defaults=((), ()))   # flags: the body's fields in order; local: the CLI's own options; params: the path's
 
@@ -139,7 +141,6 @@ def body_of(args, v):
 
 def resolve(env, args):
     """{"hub": (value, where), "token": (value|None, where)} -- the flag, then the environment, then the file."""
-    from sweep.cli import config as cfg
     saved = cfg.read(env)
     out = {}
     for name, key, fallback in (("hub", "SWEEP_HUB", DEFAULT_HUB), ("token", "SWEEP_TOKEN", None)):
@@ -156,7 +157,6 @@ def resolve(env, args):
 
 def _config(env, where, args):
     """`sweep config`: what resolved and from where, the token as set/unset. `--save` writes the file at 0600."""
-    from sweep.cli import config as cfg
     if not args.save:
         for name in ("hub", "token"):
             value, source = where[name]
@@ -178,10 +178,12 @@ LOCAL["config"] = _config
 def main(argv=None, transport=None, env=None):
     env = os.environ if env is None else env
     args = build_parser().parse_args(argv)
+    # resolving before the LOCAL dispatch is deliberate: it reads the config file, so a file others can read
+    # refuses on `config --save` too, which is what stops --save tightening a file by reading it first
     where = resolve(env, args)
-    (hub, _), (token, _) = where["hub"], where["token"]
     if args.verb in LOCAL:
         return LOCAL[args.verb](env, where, args)
+    (hub, _), (token, _) = where["hub"], where["token"]
     v = VERBS[args.verb]
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     path = v.path
