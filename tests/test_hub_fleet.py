@@ -38,8 +38,12 @@ class Freezing(unittest.TestCase):
         # is taken rather than inherited silently in either direction
         self.assertEqual(fleet.row_referrer_tables(self.conn, "host"), ("published", "reference_set", "run"))
         self.assertEqual(fleet.row_referrer_tables(self.conn, "encoder_unit"), ("admissibility_verdict", "run", "setting_verdict"))
+        self.assertEqual(fleet.row_referrer_tables(self.conn, "host_unit"), ())
+        self.assertEqual(fleet.row_referrer_tables(self.conn, "scorer"), ())
         self.assertEqual(fleet.FREEZE_EXEMPT, {"host_identity"})
         self.assertIn("host_identity", fleet.row_referrer_tables(self.conn, "host", exempt=False))
+        # host_unit and scorer have no ROW table pointing at them, which is why each names its own predicate in
+        # referrers(); a foreign key added to either lands here before it can be missed there
 
     def test_a_unit_is_frozen_by_a_run_or_a_verdict(self):
         self.assertEqual(fleet.referrers(self.conn, "encoder_unit", {"encoder_unit_id": TI5060}), {})

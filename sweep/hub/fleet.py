@@ -76,9 +76,8 @@ def _fk_counts(conn, table, key, tables):
 
 def blockers(conn, table, key):
     """{table: how many rows} for everything that points at this row, authored or measured. A row may not be removed
-    while any of them stand -- unlike a field, which only a measurement freezes."""
-    if table == "scorer":
-        return {}                                          # nothing has a foreign key to scorer
+    while any of them stand -- unlike a field, which only a measurement freezes. Nothing points at a scorer today and
+    this answers {} for one, without that being written down anywhere it could go stale."""
     return _fk_counts(conn, table, key, _referring_tables(conn, table))
 
 
@@ -131,6 +130,10 @@ def _by_key(entries, table, key, what):
     return out
 
 
+def _placement(key):
+    return f"{key[0]}@{key[1]}"
+
+
 def _units(entries):
     """(identities by id, placements by (id, host)). One unit may sit in several hosts; two entries that disagree
     on what the unit IS are a different unit and refuse."""
@@ -169,7 +172,7 @@ def _normalise(doc):
     hosts = _by_key(doc["hosts"], "host", "host", "host") if doc.get("hosts") is not None else None
     identities, placements = _units(doc["units"]) if doc.get("units") is not None else (None, None)
     scorers = _by_key(doc["scorers"], "scorer", "host", "a scorer for") if doc.get("scorers") is not None else None
-    for host, row in (scorers or {}).items():
+    for row in (scorers or {}).values():
         row["ffvship"] = json.dumps(row["ffvship"], separators=(",", ":"))
         row["score_ffmpeg"] = json.dumps(row["score_ffmpeg"], separators=(",", ":"))
     return hosts, identities, placements, scorers
@@ -213,10 +216,6 @@ def diff(conn, doc):
     return plan
 
 
-def _placement(key):
-    return f"{key[0]}@{key[1]}"
-
-
 # ---------------------------------------------------------------- making the store match
 
 def _refuse_frozen(conn, table, key, name, fields, what):
@@ -229,14 +228,15 @@ def _refuse_frozen(conn, table, key, name, fields, what):
         return
     col = locked[0]
     was, now = fields[col]
-    also = f", and so do {', '.join(locked[1:])}" if len(locked) > 1 else ""
-    raise Refusal(f"{what} {name!r} {col} differs ({was!r} -> {now!r}){also}, and {_names(refs)} name it", FROZEN_FIX[table])
+    rest = locked[1:]
+    also = f", as {'does' if len(rest) == 1 else 'do'} {', '.join(rest)}" if rest else ""
+    raise Refusal(f"{what} {name!r} {col} differs ({was!r} -> {now!r}){also}, and it is named by {_names(refs)}", FROZEN_FIX[table])
 
 
 def _refuse_blocked(conn, table, key, name, what):
     blocks = blockers(conn, table, key)
     if blocks:
-        raise Refusal(f"the document does not carry {what} {name!r}, which {_names(blocks)} name",
+        raise Refusal(f"the document does not carry {what} {name!r}, which is named by {_names(blocks)}",
                       "put it back in the document, or remove what names it first; nothing is orphaned to make a document true")
 
 
