@@ -1,14 +1,16 @@
 """sweep/hub/api/agents.py -- what an agent speaks to the hub, and nothing else speaks: its config, its heartbeat, the
 claim that hands it a run for the artifact it reports, the events and records it posts as it goes, the per-frame values
-it uploads, the ack the hub completes or fails a run at, the abandon flag it reads between cells, and the exchange's
-proof that a file reached the share. Every write is one checked transaction; every event is stamped by the hub."""
+it uploads, the ack the hub completes or fails a run at, the abandon flag it reads between cells, and the exchange: a
+file PUT with its sha and proven as it lands, a published file GET. Every write is one checked transaction; every event
+is stamped by the hub."""
 import gzip
 import json
 import os
 import pathlib
 
-from fastapi import APIRouter, Depends, Request, Response
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from sweep.hub import artifact, exchange, ingest, planner, store as st, wait
 from sweep.hub.api.common import OK, Body, get_queue, get_store, stamp
@@ -235,25 +237,54 @@ def abandon_flag(run_id: str, request: Request, store=Depends(get_store)):
     return {"abandon": run["state"] == "abandoned", "reason": None if row is None else row[0]}
 
 
-class Published(Body):
-    path: str
-    by_host: str
-    bytes: int
-    sha256: str
-    run_id: str | None = None
-    cell_key: str | None = None
-    cut_id: str | None = None
-
-
-@router.post("/exchange/published")
-def published(body: Published, request: Request, store=Depends(get_store)):
-    """The agent's sha before the copy against the hub's after it, at the pool path; only an agreement is recorded."""
-    acting_for(request, body.by_host)
+def _share_root(request):
     share = request.app.state.share
     if share is None:
-        raise Refusal("the hub has no view of the share: SWEEP_SHARE is unset", "bind-mount temp/harness into the hub and set SWEEP_SHARE")
-    exchange.verify_arrival(share, body.path, body.bytes, body.sha256)
-    with store.transaction() as conn:
-        st.require(conn, "host", host=body.by_host)
-        exchange.record_publish(conn, body.path, body.by_host, body.bytes, body.sha256, stamp(), run_id=body.run_id, cell_key=body.cell_key, cut_id=body.cut_id)
+        raise Refusal("the hub has no view of the share: SWEEP_SHARE is unset", "set SWEEP_SHARE to the exchange root, temp/harness on the pool")
+    return share
+
+
+@router.put("/exchange/files/{path:path}")
+async def put_file(path: str, by_host: str, sha256: str, request: Request, bytes_: int = Query(alias="bytes"), run_id: str | None = None,
+                   cell_key: str | None = None, cut_id: str | None = None, store=Depends(get_store)):
+    """A file lands in the exchange: streamed under a temporary name and hashed as it goes, proven against the agent's
+    sha and size, moved into place, then recorded -- in that order, so a crash leaves a file the next claim re-sends,
+    never a row nothing re-sends. A differing published row refuses before a byte is read."""
+    acting_for(request, by_host)
+    share = _share_root(request)
+    exchange.check_path(path)
+    with store.reading() as conn:
+        st.require(conn, "host", host=by_host)
+        existing = conn.execute("SELECT run_id, cell_key, cut_id, by_host, bytes, sha256 FROM published WHERE path = ?", (path,)).fetchone()
+    if existing is not None and existing != (run_id, cell_key, cut_id, by_host, bytes_, sha256):
+        raise Refusal(f"the hub already holds a different {path}", "a published file is never overwritten; publish under a new run, or remove it from the exchange by hand")
+    receiver = exchange.Receiver(share, path)
+    try:
+        async for chunk in request.stream():
+            receiver.write(chunk)
+        receiver.finish(bytes_, sha256)
+    except BaseException:
+        receiver.discard()
+        raise
+
+    def land():
+        receiver.commit()
+        with store.transaction() as conn:
+            exchange.record_publish(conn, path, by_host, bytes_, sha256, stamp(), run_id=run_id, cell_key=cell_key, cut_id=cut_id)
+    await run_in_threadpool(land)
     return OK
+
+
+@router.get("/exchange/files/{path:path}")
+def get_file(path: str, request: Request, store=Depends(get_store)):
+    """A published file, streamed to any agent; a row whose file is gone or short refuses by name."""
+    share = _share_root(request)
+    exchange.check_path(path)
+    with store.reading() as conn:
+        row = conn.execute("SELECT bytes FROM published WHERE path = ?", (path,)).fetchone()
+    if row is None:
+        raise Refusal(f"{path} is not published", "publish it first")
+    target = exchange.target_of(share, path)
+    if not target.is_file() or target.stat().st_size != row[0]:
+        raise Refusal(f"{path} is published but not at the hub", "publish it again")
+    return FileResponse(target, media_type="application/octet-stream")

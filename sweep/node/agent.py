@@ -127,7 +127,7 @@ class Agent:
         ffmpeg = ffm.as_cmd(h["ffmpeg"]) if h.get("ffmpeg") else list(self.scorer_row["score_ffmpeg"])
         probe = list(ffmpeg)
         probe[-1] = str(pathlib.PurePath(probe[-1]).with_name(pathlib.PurePath(probe[-1]).name.replace("ffmpeg", "ffprobe")))
-        return jobs.Context(host=h["host"], os=h["os"], work_root=h["work_root"], share_root=h.get("share_root"), ffmpeg=ffmpeg, ffprobe=probe,
+        return jobs.Context(host=h["host"], os=h["os"], work_root=h["work_root"], client=self.client, ffmpeg=ffmpeg, ffprobe=probe,
                             ffvship=self.scorer_row["ffvship"] if self.scorer_row else None,
                             score_ffmpeg=self.scorer_row["score_ffmpeg"] if self.scorer_row else None,
                             run_dir=pathlib.Path(h["work_root"]) / "runs" / run_id)
@@ -240,13 +240,9 @@ class Agent:
             if spec["relative"] in done:
                 continue
             try:
-                body = jobs.publish_file(spec, ctx)
+                jobs.publish_file(spec, ctx)
             except jobs.JobError as e:
                 self._say(f"publish {spec['relative']}: {e}")
-                continue
-            r = self._post("/exchange/published", body)
-            if r.status_code != 200:
-                self._say(f"published refused for {spec['relative']}: {r.text}")
         r = self._post(f"/agents/{self.config.host}/ack", {"entry_id": claim["entry_id"]})
         self._say(f"publish job {claim['entry_id']}: {r.text}")
 

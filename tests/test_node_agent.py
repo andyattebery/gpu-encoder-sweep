@@ -8,6 +8,7 @@ a publish job puts files on the share with a sha both ends.
 """
 import contextlib
 import gzip
+import hashlib
 import json
 import os
 import io
@@ -16,6 +17,7 @@ import unittest
 from unittest import mock
 
 from sweep.hub import wait
+from sweep.node import jobs
 from tests.hub_helpers import post
 from tests.node_helpers import CLASS, UNIT, hub_and_agent, make_sample
 
@@ -142,6 +144,19 @@ class EndToEnd(unittest.TestCase):
         scorer.start()
         same = self.plan("/runs/score", {"run_id": run_id, "scorer": "sco"})                         # a scorer on the same machine views, no pull
         self.assertTrue(same["run_id"].startswith("score-"))
+
+    def test_a_host_on_another_machine_pulls_a_published_file_through_the_hub(self):
+        run_id = self.plan("/runs/encode", VIEW)["run_id"]
+        self.agent.serve_once()
+        entry_id = self.plan("/runs/publish", {"run_id": run_id})["entry_id"]
+        self.assertEqual(self.agent.serve_once(), f"publish:{entry_id}")
+        row = next(p for p in self.p.store.rows("published") if p["run_id"] == run_id)
+        far = jobs.Context(host="far", os="linux", work_root=str(self.p.root / "far"), client=self.p.client, ffmpeg=[], ffprobe=[], ffvship=None,
+                           score_ffmpeg=None, run_dir=self.p.root / "far" / "runs" / "x")          # far shares no directory with enc or the hub
+        dest = self.p.root / "far" / pathlib.Path(*row["path"].split("/"))
+        jobs.pull({"relative": row["path"], "sha256": row["sha256"], "bytes": row["bytes"]}, str(dest), far)
+        self.assertEqual(hashlib.sha256(dest.read_bytes()).hexdigest(), row["sha256"])
+        self.assertEqual(dest.read_bytes(), (self.p.dirs["work"] / pathlib.Path(*row["path"].split("/"))).read_bytes())
 
     def test_records_are_reposted_after_a_crash_before_the_post(self):
         run_id = self.plan("/runs/encode", VIEW)["run_id"]

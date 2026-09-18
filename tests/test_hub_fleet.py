@@ -86,7 +86,7 @@ class Diff(unittest.TestCase):
 
     def test_a_new_host_is_a_creation(self):
         self.doc["hosts"].append({"host": "htpc-02", "ssh_host": "htpc-02", "os": "linux", "machine": "htpc-02",
-                                  "work_root": "/data/sweep", "share_root": "/share",
+                                  "work_root": "/data/sweep",
                                   "ffmpeg": None, "local_view": None, "notes": None})
         d = fleet.diff(self.conn, self.doc)
         self.assertEqual(d["created"]["hosts"], ["htpc-02"])
@@ -143,9 +143,9 @@ class ColumnsAreThePinnedSet(unittest.TestCase):
 FLEET = {
     "hosts": [
         {"host": "nas-01", "ssh_host": "nas-01", "os": "linux", "machine": "nas-01",
-         "work_root": "/data", "share_root": "/share", "ffmpeg": None, "local_view": None, "notes": None},
+         "work_root": "/data", "ffmpeg": None, "local_view": None, "notes": None},
         {"host": "box", "ssh_host": "box", "os": "linux", "machine": "box",
-         "work_root": "/w", "share_root": "/share", "ffmpeg": "/ff/ffmpeg", "local_view": None, "notes": None},
+         "work_root": "/w", "ffmpeg": "/ff/ffmpeg", "local_view": None, "notes": None},
     ],
     "units": [
         {"encoder_unit_id": A4000, "vendor": "nvidia", "card": "NVIDIA RTX A4000", "driver": "595",

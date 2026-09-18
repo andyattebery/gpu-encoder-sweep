@@ -86,7 +86,7 @@ class Waiter(unittest.TestCase):
             exchange.record_publish(conn, "runs/b580-viewing/enc/g-a.mkv", "media-01", 1, "s" * 64, "2026-09-08T10:00", run_id="b580-viewing", cell_key="g-a")
         job = {"kind": "publish", "by_host": "media-01", "files": [{"relative": "runs/b580-viewing/enc/g-a.mkv"}, {"relative": "runs/b580-viewing/enc/g-b.mkv"}]}
         with self.store.reading() as conn:
-            self.assertEqual(wait.verify_publish(conn, job), "1 of 2 files are not on the share: runs/b580-viewing/enc/g-b.mkv")
+            self.assertEqual(wait.verify_publish(conn, job), "1 of 2 files are not at the hub: runs/b580-viewing/enc/g-b.mkv")
 
 
 if __name__ == "__main__":

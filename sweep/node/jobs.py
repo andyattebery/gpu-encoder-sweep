@@ -1,6 +1,7 @@
 """sweep/node/jobs.py -- what the agent does with one cell of the plan it was handed: encode it and count its frames,
-probe a title, adopt a cut, score by recipe S1, time by recipe T1, publish a file with a sha on both ends. Every argv
-comes from the plan or from the one builder with the plan's parameters; nothing here composes an encoder option."""
+probe a title, adopt a cut, score by recipe S1, time by recipe T1, publish a file to the hub and pull one from it with
+a sha on both ends. Every argv comes from the plan or from the one builder with the plan's parameters; nothing here
+composes an encoder option. Nothing here touches a mount: the hub is the only way a file leaves a machine."""
 import dataclasses
 import datetime as dt
 import hashlib
@@ -55,7 +56,7 @@ class Context:
     host: str
     os: str
     work_root: str
-    share_root: str | None
+    client: object                  # the agent's httpx client: the exchange is PUT and GET against the hub
     ffmpeg: list
     ffprobe: list
     ffvship: list | None
@@ -228,43 +229,56 @@ def adopt_cut(cut, refset, ctx):
 
 # ---------------------------------------------------------------- the exchange
 
+CHUNK = 8 << 20
+
+
+def _chunks(path):
+    with open(path, "rb") as fh:
+        while chunk := fh.read(CHUNK):
+            yield chunk
+
+
+def _refused(response, what):
+    """A non-200 from the hub is a JobError carrying the hub's own text: a refusal names its fix, so it is logged as is."""
+    return JobError(response.text.strip(), f"the hub refused the {what}")
+
+
 def pull(spec, dest, ctx):
-    """Copy a published file from the share to the work root and prove it by the sha the hub recorded."""
-    if not ctx.share_root:
-        raise JobError(f"{ctx.host} has no share root to pull {spec['relative']} from", "add-host with --share-root")
-    src = pathlib.Path(ctx.share_root).joinpath(*spec["relative"].split("/"))
-    if not src.is_file():
-        raise JobError(f"{spec['relative']} is not on the share as {ctx.host} sees it", "publish it first")
-    pathlib.Path(dest).parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(src, dest)
-    sha = ffm.sha256_file(dest)
-    if sha != spec["sha256"] or os.path.getsize(dest) != spec["bytes"]:
-        pathlib.Path(dest).unlink(missing_ok=True)
+    """Stream a published file from the hub into the work root and prove it by the sha the hub recorded; a mismatch
+    leaves nothing behind."""
+    dest = pathlib.Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    part = dest.with_name(dest.name + ".part")
+    h, size = hashlib.sha256(), 0
+    with ctx.client.stream("GET", f"/exchange/files/{spec['relative']}") as r:
+        if r.status_code != 200:
+            r.read()
+            raise _refused(r, "pull")
+        with open(part, "wb") as fh:
+            for chunk in r.iter_bytes(CHUNK):
+                fh.write(chunk)
+                h.update(chunk)
+                size += len(chunk)
+    sha = h.hexdigest()
+    if sha != spec["sha256"] or size != spec["bytes"]:
+        part.unlink(missing_ok=True)
         raise JobError(f"{spec['relative']} differs after the pull (sha {sha[:12]}, expected {spec['sha256'][:12]})", "the transfer is corrupt; pull again")
-    return dest
+    os.replace(part, dest)
+    return str(dest)
 
 
 def publish_file(spec, ctx):
-    """Copy a file to the share and report the sha computed before the copy and after it; a share this runtime cannot
-    write refuses before anything moves (the eta scoring container's CIFS mount is the case the probe exists for)."""
-    if not ctx.share_root:
-        raise JobError(f"{ctx.host} has no share root", "add-host with --share-root")
-    share = pathlib.Path(ctx.share_root)
-    probe = share / f".probe-{ctx.host}"
-    try:
-        probe.write_bytes(b"probe")
-        probe.unlink()
-    except OSError as e:
-        raise JobError(f"the share is not writable from {ctx.host}: {e}", "the role mounts temp/harness read-write with the credential from the vault") from e
-    before = ffm.sha256_file(spec["local"])
-    dest = share.joinpath(*spec["relative"].split("/"))
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(spec["local"], dest)
-    after = ffm.sha256_file(dest)
-    if after != before:
-        raise JobError(f"{spec['relative']} differs after the copy (sha {after[:12]} on the share, {before[:12]} before it)", "the transfer is corrupt; publish again")
-    return {"path": spec["relative"], "by_host": ctx.host, "bytes": os.path.getsize(spec["local"]), "sha256": before,
-            "run_id": spec.get("run_id"), "cell_key": spec.get("cell_key"), "cut_id": spec.get("cut_id")}
+    """PUT a file to the hub with the sha and size computed before the send, declared up front so the hub can hold the
+    stream against them; the hub's refusal, if any, is the error."""
+    local = spec["local"]
+    if not os.path.isfile(local):
+        raise JobError(f"{local} does not exist on {ctx.host}", "the plan names a file this host should hold; check the run's work root")
+    before, size = ffm.sha256_file(local), os.path.getsize(local)
+    params = {"by_host": ctx.host, "bytes": size, "sha256": before}
+    params.update({k: spec[k] for k in ("run_id", "cell_key", "cut_id") if spec.get(k) is not None})
+    r = ctx.client.put(f"/exchange/files/{spec['relative']}", params=params, content=_chunks(local), headers={"Content-Length": str(size)})
+    if r.status_code != 200:
+        raise _refused(r, "publish")
 
 
 # ---------------------------------------------------------------- scoring

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """sweep/hub/api/agents.py: what an agent speaks to the hub -- config, heartbeat, claim, events, records, frames, ack,
-abandon, and the exchange's published -- each refusing what the record refuses, with the hub completing a run at ack.
+abandon, and the exchange's PUT and GET -- each refusing what the record refuses, with the hub completing a run at ack.
 
     python3 -m unittest tests.test_hub_agents
 """
 import gzip
+import hashlib
 import json
 import pathlib
 import tempfile
@@ -165,31 +166,93 @@ class Agents(unittest.TestCase):
         status, text = post(self.client, "/runs/b580-viewing-score/frames", dict(body, values=[1.0]))
         self.assertEqual((status, text), (422, "REFUSING: b580-viewing-score already holds frames for g-a ssimulacra2 that differ -- a record is never overwritten; abandon the run and re-plan"))
 
-    def test_published_is_verified_at_the_pool_path_then_recorded(self):
-        data = b"z" * 5000
-        (self.share / "runs" / "b580-viewing" / "enc").mkdir(parents=True)
-        (self.share / "runs" / "b580-viewing" / "enc" / "g-a.mkv").write_bytes(data)
-        body = {"path": "runs/b580-viewing/enc/g-a.mkv", "by_host": "media-01", "bytes": 5000, "sha256": exchange.sha256_file(self.share / "runs" / "b580-viewing" / "enc" / "g-a.mkv"),
-                "run_id": "b580-viewing", "cell_key": "g-a", "cut_id": None}
-        self.assertEqual(post(self.client, "/exchange/published", dict(body, sha256="0" * 64))[0], 422)
-        self.assertEqual(post(self.client, "/exchange/published", body), (200, '{"ok":true}'))
-        self.assertEqual(len([p for p in self.store.rows("published") if p["cell_key"] == "g-a"]), 1)
-        status, text = post(self.client, "/agents/media-01/ack", {"entry_id": "nope"})
-        self.assertEqual(status, 422)
+    # ---- the exchange
+    def put(self, rel, data, sha=None, client=None, **ids):
+        params = {"by_host": "media-01", "bytes": len(data), "sha256": sha or hashlib.sha256(data).hexdigest(), **{k: v for k, v in ids.items() if v is not None}}
+        r = (client or self.client).put(f"/exchange/files/{rel}", params=params, content=data, headers={"Content-Length": str(len(data))})
+        return r.status_code, r.text
 
-    def test_a_publish_job_is_claimed_and_acked_once_every_file_is_on_the_share(self):
+    def files_under(self, root):
+        return sorted(str(p.relative_to(root)) for p in pathlib.Path(root).rglob("*") if p.is_file())
+
+    def test_a_put_lands_the_file_and_records_the_publish(self):
+        data = b"z" * 5000
+        rel = "runs/b580-viewing/enc/g-a.mkv"
+        self.assertEqual(self.put(rel, data, run_id="b580-viewing", cell_key="g-a"), (200, '{"ok":true}'))
+        self.assertEqual((self.share / "runs" / "b580-viewing" / "enc" / "g-a.mkv").read_bytes(), data)
+        self.assertEqual(self.files_under(self.share), [rel])                                          # nothing temporary beside it
+        row = next(p for p in self.store.rows("published") if p["path"] == rel)
+        self.assertEqual((row["by_host"], row["bytes"], row["sha256"], row["run_id"], row["cell_key"], row["cut_id"]),
+                         ("media-01", 5000, hashlib.sha256(data).hexdigest(), "b580-viewing", "g-a", None))
+        self.assertEqual(self.put(rel, data, run_id="b580-viewing", cell_key="g-a"), (200, '{"ok":true}'))   # identical: a no-op
+
+    def test_a_put_with_the_wrong_sha_is_refused_and_leaves_nothing(self):
+        data = b"z" * 5000
+        rel = "runs/b580-viewing/enc/g-a.mkv"
+        status, text = self.put(rel, data, sha="0" * 64, run_id="b580-viewing", cell_key="g-a")
+        self.assertEqual((status, text), (422, f"REFUSING: {rel} differs in transit (sha {hashlib.sha256(data).hexdigest()[:12]} at the hub, 000000000000 before the send)"
+                                              " -- the transfer is corrupt; publish again"))
+        self.assertEqual(self.files_under(self.share), [])
+        self.assertEqual([p for p in self.store.rows("published") if p["path"] == rel], [])
+
+    def test_a_put_of_a_differing_file_to_a_published_path_is_refused_before_the_stream(self):
+        rel = "runs/b580-viewing/enc/g-a.mkv"
+        self.assertEqual(self.put(rel, b"z" * 5000, run_id="b580-viewing", cell_key="g-a")[0], 200)
+        status, text = self.put(rel, b"y" * 5000, run_id="b580-viewing", cell_key="g-a")
+        self.assertEqual((status, text), (422, f"REFUSING: the hub already holds a different {rel} -- a published file is never overwritten; "
+                                              "publish under a new run, or remove it from the exchange by hand"))
+        self.assertEqual((self.share / "runs" / "b580-viewing" / "enc" / "g-a.mkv").read_bytes(), b"z" * 5000)
+        self.assertEqual(self.files_under(self.share), [rel])
+
+    def test_a_put_outside_the_two_kinds_is_refused(self):
+        status, text = self.put("logs/hub.sqlite", b"z", run_id="b580-viewing", cell_key="g-a")          # a `..` never reaches the hub: the client resolves it
+        self.assertEqual((status, text), (422, "REFUSING: logs/hub.sqlite is not an exchange path -- the exchange holds "
+                                              "runs/<run_id>/enc/<cell_key>.mkv and refsets/<reference_set_id>/<window_id>.<kind>.mkv"))
+        self.assertEqual(self.files_under(self.share), [])
+
+    def test_a_put_by_an_unknown_host_is_refused(self):
+        r = self.client.put("/exchange/files/runs/b580-viewing/enc/g-a.mkv", params={"by_host": "nope", "bytes": 1, "sha256": "0" * 64, "run_id": "b580-viewing", "cell_key": "g-a"}, content=b"z")
+        self.assertEqual(r.status_code, 422)
+        self.assertEqual(r.text, "REFUSING: host host='nope' does not exist -- add it first with add-host")
+
+    def test_without_a_share_root_the_exchange_refuses(self):
+        client = client_for(self.store, queue=self.queue, frames=self.frames)
+        refusal = "REFUSING: the hub has no view of the share: SWEEP_SHARE is unset -- set SWEEP_SHARE to the exchange root, temp/harness on the pool"
+        self.assertEqual(self.put("runs/b580-viewing/enc/g-a.mkv", b"z", client=client, run_id="b580-viewing", cell_key="g-a"), (422, refusal))
+        r = client.get("/exchange/files/runs/b580-viewing/enc/g-a.mkv")
+        self.assertEqual((r.status_code, r.text), (422, refusal))
+
+    def test_a_get_of_an_unpublished_path_is_refused(self):
+        r = self.client.get("/exchange/files/runs/b580-viewing/enc/g-a.mkv")
+        self.assertEqual((r.status_code, r.text), (422, "REFUSING: runs/b580-viewing/enc/g-a.mkv is not published -- publish it first"))
+
+    def test_a_get_streams_a_published_file(self):
+        data = bytes(range(256)) * 100
+        rel = "refsets/stage-1080p/tng.reference.mkv"
+        self.assertEqual(self.put(rel, data, cut_id="tng.ref")[0], 200)
+        with self.client.stream("GET", f"/exchange/files/{rel}") as r:
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(r.headers["content-length"], str(len(data)))
+            self.assertEqual(b"".join(r.iter_bytes()), data)
+
+    def test_a_get_of_a_published_row_whose_file_is_gone_is_refused(self):
+        rel = "runs/b580-viewing/enc/g-a.mkv"
+        self.assertEqual(self.put(rel, b"z" * 5000, run_id="b580-viewing", cell_key="g-a")[0], 200)
+        (self.share / "runs" / "b580-viewing" / "enc" / "g-a.mkv").write_bytes(b"z")
+        r = self.client.get(f"/exchange/files/{rel}")
+        self.assertEqual((r.status_code, r.text), (422, f"REFUSING: {rel} is published but not at the hub -- publish it again"))
+        (self.share / "runs" / "b580-viewing" / "enc" / "g-a.mkv").unlink()
+        self.assertEqual(self.client.get(f"/exchange/files/{rel}").status_code, 422)
+
+    def test_a_publish_job_is_claimed_and_acked_once_every_file_is_at_the_hub(self):
         _, text = post(self.client, "/runs/publish", {"run_id": "b580-viewing"})
         entry_id = json.loads(text)["entry_id"]
         claim = self.client.post("/agents/media-01/claim", json={"block_s": 0}).json()
         self.assertEqual((claim["kind"], claim["entry_id"], len(claim["files"]), claim["done"]), ("publish", entry_id, 3, []))
         status, text = post(self.client, "/agents/media-01/ack", {"entry_id": entry_id})
-        self.assertEqual((status, text), (422, "REFUSING: 3 of 3 files are not on the share: runs/b580-viewing/enc/g-a.mkv, runs/b580-viewing/enc/g-b.mkv, runs/b580-viewing/enc/g-i.mkv -- publish them before the ack"))
+        self.assertEqual((status, text), (422, "REFUSING: 3 of 3 files are not at the hub: runs/b580-viewing/enc/g-a.mkv, runs/b580-viewing/enc/g-b.mkv, runs/b580-viewing/enc/g-i.mkv -- publish them before the ack"))
         for key in ("g-a", "g-b", "g-i"):
-            (self.share / "runs" / "b580-viewing" / "enc").mkdir(parents=True, exist_ok=True)
-            f = self.share / "runs" / "b580-viewing" / "enc" / f"{key}.mkv"
-            f.write_bytes(key.encode() * 100)
-            post(self.client, "/exchange/published", {"path": f"runs/b580-viewing/enc/{key}.mkv", "by_host": "media-01", "bytes": 300, "sha256": exchange.sha256_file(f),
-                                                       "run_id": "b580-viewing", "cell_key": key, "cut_id": None})
+            self.assertEqual(self.put(f"runs/b580-viewing/enc/{key}.mkv", key.encode() * 100, run_id="b580-viewing", cell_key=key)[0], 200)
         self.assertEqual(post(self.client, "/agents/media-01/ack", {"entry_id": entry_id}), (200, '{"ok":true}'))
         self.assertEqual(self.queue.pending("media-01"), [])
 

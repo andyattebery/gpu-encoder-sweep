@@ -8,7 +8,7 @@ both, and the hub hands a run only to an agent whose artifact is the one the pla
 
 | image | base, pinned | adds | runs on |
 |---|---|---|---|
-| `hub` | `python:3.14-slim` by digest | the `hub` extra (fastapi, uvicorn, redis) | nas-01 |
+| `hub` | `python:3.14-slim` by digest | the `hub` and `node` extras (fastapi, uvicorn, redis, httpx); the same linux64 portable jellyfin-ffmpeg the node images carry, so the hub's own agent probes with the nodes' build | nas-01, as the hub and as the `nas-01` agent |
 | `node-encode` | `ghcr.io/haveagitgat/tdarr_node` by the digest `:latest` resolved to on 2026-09-07 — production's image, so the VAAPI driver and Mesa are production's | the linux64 portable jellyfin-ffmpeg at `v8.1.2-3+nvenc-n13.0.19.1` under `/opt/jellyfin-ffmpeg/bin`; python via uv; the `node` extra | media-01 |
 | `node-encode-mesarc` | `ghcr.io/andyattebery/tdarr-node-mesa-fresh` by the digest `:mesarc` resolved to on 2026-09-08 — the same tdarr layer `node-encode` pins, with Mesa `26.2.2…~n~mesarc0` from `ppa:ernstp/mesarc`; it is what htpc-01 encodes with | the same as `node-encode`, plus a build-time assertion that our apt layer left `mesa-libgallium` and `radeonsi_drv_video.so` alone | htpc-01 |
 | `node-score` | `nvidia/cuda:13.3.1-runtime-ubuntu26.04` by digest; FFVship built in a `13.3.1-devel` stage at Vship `v5.1.0` from Codeberg | FFVship and `libvship.so`; the same jellyfin-ffmpeg (`libvmaf_cuda`); python via uv; the `node` extra | media-01, eta-wsl |
@@ -26,12 +26,17 @@ The agent takes three environment variables and asks the hub for the rest (`GET 
 
 - `SWEEP_HUB` — the hub's URL; `SWEEP_TOKEN` — this host's token, from the vault; `SWEEP_HOST` — the host row.
 - The work root, mounted read-write at the path `add-host` gave as `work_root` (the same path inside and out keeps
-  every plan's argv true on both sides); the share's `temp/harness/` read-write at `share_root`; for a score
-  container on a machine with an encode runtime, the encode runtime's work root at `local_view`.
+  every plan's argv true on both sides); for a score container on a machine with an encode runtime, the encode
+  runtime's work root at `local_view`. No share: a file crosses machines through the hub's API, never a mount.
 - The GPU: the nvidia runtime with `compute,utility,video` for NVIDIA cards; `/dev/dri` for the B580 and the 9070 XT.
-- The hub: `/data` (the SQLite store and the per-frame values), `/share` = the pool's `temp/harness`, Redis in the
-  same stack (`SWEEP_REDIS=redis://redis:6379`), the operator's token as `SWEEP_TOKEN`, the agents' tokens as a JSON
-  file `{host: token}` named by `SWEEP_AGENT_TOKENS`, traefik labels for TLS.
+- The hub: `/data` (the SQLite store and the per-frame values), `/share` = the pool's `temp/harness` (the exchange,
+  the hub's alone), Redis in the same stack (`SWEEP_REDIS=redis://redis:6379`), the operator's token as
+  `SWEEP_TOKEN`, the agents' tokens as a JSON file `{host: token}` named by `SWEEP_AGENT_TOKENS`, `SWEEP_HOST` = the
+  hub's own host row (the runtime `inventory` runs on), traefik labels for TLS. A second service from the hub image
+  is that runtime: `sweep-node serve` with the three agent variables (`SWEEP_HUB` on the stack network, the host's
+  token, `SWEEP_HOST` the same row), the library bind-mounted read-only at the path `title.path` will carry, and a
+  work root under `/data` as the host row names it. Behind traefik, a publish is one long `PUT`; the entrypoint's
+  read timeout must outlast the largest cut.
 
 The native Windows agent on eta is the same package with no image:
 `uvx --from "gpu-encoder-sweep[node] @ git+https://github.com/andyattebery/gpu-encoder-sweep@<sha or tag>" sweep-node serve`

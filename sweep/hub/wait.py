@@ -48,7 +48,7 @@ def verify_publish(conn, job):
     """The reason a publish job is not done, or None: every file it named is a published row."""
     files = [f["relative"] for f in job.get("files", [])]
     missing = [f for f in files if conn.execute("SELECT 1 FROM published WHERE path = ?", (f,)).fetchone() is None]
-    return None if not missing else f"{len(missing)} of {len(files)} files are not on the share: {', '.join(missing)}"
+    return None if not missing else f"{len(missing)} of {len(files)} files are not at the hub: {', '.join(missing)}"
 
 
 def sweep_once(store, queue):

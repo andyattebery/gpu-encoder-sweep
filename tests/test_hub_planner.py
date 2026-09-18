@@ -238,12 +238,12 @@ class ScoreTimePublish(unittest.TestCase):
         self.add_scorer("eta-wsl")
         with self.assertRaises(Refusal) as cm:
             self.plan_in(planner.plan_score, "b580-viewing", NOW, scorer="eta-wsl")
-        self.assertEqual(str(cm.exception), "REFUSING: reference cut tng.ref is neither on eta nor on the share -- publish --cut tng.ref first, or score on media-01-score")
+        self.assertEqual(str(cm.exception), "REFUSING: reference cut tng.ref is neither on eta nor at the hub -- publish --cut tng.ref first, or score on media-01-score")
         with self.store.transaction() as conn:
             exchange.record_publish(conn, "refsets/stage-1080p/tng.reference.mkv", "media-01", 2000000000, "r" * 64, "2026-09-08T09:00", cut_id="tng.ref")
         with self.assertRaises(Refusal) as cm:
             self.plan_in(planner.plan_score, "b580-viewing", NOW, scorer="eta-wsl")
-        self.assertEqual(str(cm.exception), "REFUSING: cell g-a of run b580-viewing is not on the share -- publish --run b580-viewing first, or score on media-01-score")
+        self.assertEqual(str(cm.exception), "REFUSING: cell g-a of run b580-viewing is not at the hub -- publish --run b580-viewing first, or score on media-01-score")
         with self.store.transaction() as conn:
             for key in ("g-a", "g-b", "g-i"):
                 exchange.record_publish(conn, f"runs/b580-viewing/enc/{key}.mkv", "media-01", 52000000, "e" * 64, "2026-09-08T09:10", run_id="b580-viewing", cell_key=key)
@@ -294,22 +294,41 @@ class ScoreTimePublish(unittest.TestCase):
         self.assertEqual(self.queue.pending("media-01"), [])
 
     # ---- publish
-    def test_publish_lists_a_runs_kept_encodes_and_a_cut_via_another_runtime(self):
+    def test_publish_lists_a_runs_kept_encodes_from_the_runs_own_host(self):
         host, body = self.plan_in(planner.plan_publish, run_id="b580-viewing")
         self.assertEqual(host, "media-01")
         self.assertEqual(body["files"][0], {"local": "/mnt/data/sweep/runs/b580-viewing/enc/g-a.mkv", "relative": "runs/b580-viewing/enc/g-a.mkv",
                                             "run_id": "b580-viewing", "cell_key": "g-a", "cut_id": None})
         self.assertEqual(len(body["files"]), 3)
-        host, body = self.plan_in(planner.plan_publish, run_id="b580-viewing", via="media-01-score")
-        self.assertEqual((host, body["files"][0]["local"]), ("media-01-score", "/mnt/data/sweep/runs/b580-viewing/enc/g-a.mkv"))
-        host, body = self.plan_in(planner.plan_publish, cut_ids=["tng.ref"], via="media-01-score")
+        self.assertEqual(body["by_host"], "media-01")
+        with self.assertRaises(Refusal):
+            self.plan_in(planner.plan_publish, run_id="b580-qsv-av1")                 # nothing kept
+        with self.assertRaises(Refusal) as cm:
+            self.plan_in(planner.plan_publish)
+        self.assertEqual(str(cm.exception), "REFUSING: publish names nothing -- give --run-id, --cut-ids, or both")
+
+    def test_publish_sends_a_cut_from_the_host_whose_materialise_run_holds_it(self):
+        host, body = self.plan_in(planner.plan_publish, cut_ids=["tng.ref"])
+        self.assertEqual(host, "media-01")
         self.assertEqual(body["files"], [{"local": "/mnt/data/sweep/refsets/stage-1080p/tng.reference.mkv", "relative": "refsets/stage-1080p/tng.reference.mkv",
                                           "run_id": None, "cell_key": None, "cut_id": "tng.ref"}])
         with self.assertRaises(Refusal) as cm:
-            self.plan_in(planner.plan_publish, cut_ids=["tng.ref"], via="eta-wsl")   # nothing on eta's machine holds the reference set
-        self.assertIn("tng.ref", str(cm.exception))
-        with self.assertRaises(Refusal):
-            self.plan_in(planner.plan_publish, run_id="b580-qsv-av1")                 # nothing kept
+            self.plan_in(planner.plan_publish, cut_ids=["nope.ref"])
+        self.assertIn("nope.ref", str(cm.exception))
+
+    def test_publish_refuses_files_that_sit_on_different_hosts(self):
+        with self.store.transaction() as conn:                                        # eta materialised tng later: it is the holder now
+            conn.execute("INSERT INTO run (run_id, encoder_unit_id, host, node_label, stage, artifact, ffmpeg_build, ffmpeg_sha, harness_version, "
+                         "started_at, finished_at, state, fetched_at, verified_at) VALUES ('eta-materialise', 'nvidia-5060ti-595-nvenc-av1', 'eta', 'eta-nv', "
+                         "'materialise', 'uvx:0.0.2.dev0+g0', '8.1.2-Jellyfin', '0b0ea2d', 'g0', '2026-09-01T09:00', '2026-09-01T11:00', 'complete', "
+                         "'2026-09-01T11:00', '2026-09-01T11:00')")
+            conn.execute("INSERT INTO run_window VALUES ('eta-materialise', 'tng')")
+            for state, at in (("planned", "2026-09-01T08:00"), ("launched", "2026-09-01T08:30"), ("running", "2026-09-01T09:00"), ("complete", "2026-09-01T11:00")):
+                st.post_event(conn, "eta-materialise", at, state, None)
+        self.assertEqual(self.plan_in(planner.plan_publish, cut_ids=["tng.ref"])[0], "eta")
+        with self.assertRaises(Refusal) as cm:
+            self.plan_in(planner.plan_publish, run_id="b580-viewing", cut_ids=["tng.ref"])
+        self.assertEqual(str(cm.exception), "REFUSING: the files are on 2 hosts (eta, media-01) -- publish each host's in its own call")
 
 
 if __name__ == "__main__":

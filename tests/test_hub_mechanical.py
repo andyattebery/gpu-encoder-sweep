@@ -20,20 +20,27 @@ class Mechanical(unittest.TestCase):
     def setUp(self):
         self.store = fixture_store()
         self.addCleanup(self.store.close)
-        self.client = client_for(self.store)
+        self.client = client_for(self.store, hub_host="media-01")
         self.queue = self.client.app.state.queue
 
     def run_row(self, run_id):
         return next(r for r in self.store.rows("run") if r["run_id"] == run_id)
 
-    def test_inventory_plans_and_enqueues(self):
-        status, text = post(self.client, "/runs/inventory", {"host": "media-01", "library": "movies", "titles": [{"title_id": "x", "path": "/media/x.mkv"}]})
+    def test_inventory_plans_and_enqueues_on_the_hubs_own_runtime(self):
+        status, text = post(self.client, "/runs/inventory", {"library": "movies", "titles": [{"title_id": "x", "path": "/media/x.mkv"}]})
         self.assertEqual(status, 200, text)
         run_id = json.loads(text)["run_id"]
         self.assertTrue(run_id.startswith("inventory-media-01-"))
         self.assertEqual(self.run_row(run_id)["state"], "planned")
         pending = self.queue.pending("media-01")
         self.assertEqual((len(pending), pending[0].run_id, pending[0].plan["run"]["stage"], pending[0].plan["inputs"][0]["title_id"]), (1, run_id, "inventory", "x"))
+        status, text = post(self.client, "/runs/inventory", {"host": "eta", "library": "movies", "titles": []})       # no verb names another host
+        self.assertEqual((status, text), (422, "REFUSING: inventory does not take 'host' -- the fields are: library, titles"))
+
+    def test_inventory_refuses_when_the_hub_names_no_runtime_of_its_own(self):
+        client = client_for(self.store)
+        status, text = post(client, "/runs/inventory", {"library": "movies", "titles": [{"title_id": "x", "path": "/media/x.mkv"}]})
+        self.assertEqual((status, text), (422, "REFUSING: the hub has no runtime of its own: SWEEP_HOST is unset -- set SWEEP_HOST to the hub's host row and run its agent beside it"))
 
     def test_materialise_adopts_and_refuses_cutting(self):
         body = {"host": "eta", "encoder_unit_id": TI5060, "reference_set_id": "stage-1080p", "geometry": "1920x1080", "pix_fmt": "p010le",
@@ -75,8 +82,7 @@ class Mechanical(unittest.TestCase):
         self.assertEqual((entry.entry_id, entry.run_id, len(entry.plan["files"])), (json.loads(text)["entry_id"], None, 3))
 
     def test_the_refusals_reach_the_client_as_422_text(self):
-        for path, body, word in [("/runs/inventory", {"host": "nope", "library": "m", "titles": []}, "host"),
-                                 ("/runs/score", {"run_id": "b580-qsv-av1"}, "kept"),
+        for path, body, word in [("/runs/score", {"run_id": "b580-qsv-av1"}, "kept"),
                                  ("/runs/publish", {"run_id": "b580-qsv-av1"}, "kept"),
                                  ("/runs/score", {"run_id": "b580-viewing", "scorer": "eta"}, "scorer"),
                                  ("/runs/encode", {"search_id": SEARCH, "host": "media-01", "windows": ["sopranos"]}, "sopranos")]:

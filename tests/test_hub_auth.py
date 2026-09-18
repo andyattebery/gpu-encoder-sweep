@@ -13,7 +13,7 @@ import unittest
 from sweep.hub import auth
 from tests.hub_helpers import client_for, fixture_store
 
-HOST = {"host": "htpc-02", "ssh_host": "htpc-02", "os": "linux", "machine": "htpc-02", "work_root": "/data/sweep", "share_root": "/mnt/nas-01/sweep", "ffmpeg": "/ffmpeg/ffmpeg"}
+HOST = {"host": "htpc-02", "ssh_host": "htpc-02", "os": "linux", "machine": "htpc-02", "work_root": "/data/sweep", "ffmpeg": "/ffmpeg/ffmpeg"}
 
 
 def bearer(token):
@@ -43,6 +43,16 @@ class Tokens(unittest.TestCase):
         r = self.client.post("/agents/media-01/claim", json={"block_s": 0}, headers=bearer("op"))
         self.assertEqual((r.status_code, r.text), (401, "REFUSING: POST /agents/media-01/claim takes an agent's token -- set SWEEP_TOKEN on the agent to the token the hub holds for its host"))
         self.assertEqual(self.client.post("/catalogue/add-host", json=HOST, headers=bearer("op")).status_code, 200)
+
+    def test_the_exchange_is_an_agent_door(self):
+        put = dict(params={"by_host": "media-01", "bytes": 1, "sha256": "0" * 64, "run_id": "b580-viewing", "cell_key": "g-a"}, content=b"z")
+        r = self.client.put("/exchange/files/runs/b580-viewing/enc/g-a.mkv", headers=bearer("op"), **put)
+        self.assertEqual((r.status_code, r.text), (401, "REFUSING: PUT /exchange/files/runs/b580-viewing/enc/g-a.mkv takes an agent's token -- set SWEEP_TOKEN on the agent to the token the hub holds for its host"))
+        self.assertEqual(self.client.get("/exchange/files/runs/b580-viewing/enc/g-a.mkv", headers=bearer("op")).status_code, 401)
+        r = self.client.put("/exchange/files/runs/b580-viewing/enc/g-a.mkv", headers=bearer("a2"), **put)              # eta's token cannot publish as media-01
+        self.assertEqual((r.status_code, r.text), (401, "REFUSING: the token presented is eta's, not media-01's -- an agent acts for its own host only"))
+        r = self.client.get("/exchange/files/runs/b580-viewing/enc/g-a.mkv", headers=bearer("a2"))                    # any agent may pull
+        self.assertEqual((r.status_code, r.text), (422, "REFUSING: the hub has no view of the share: SWEEP_SHARE is unset -- set SWEEP_SHARE to the exchange root, temp/harness on the pool"))
 
     def test_no_or_wrong_token_is_refused_everywhere(self):
         self.assertEqual(self.client.get("/runs/status").status_code, 401)

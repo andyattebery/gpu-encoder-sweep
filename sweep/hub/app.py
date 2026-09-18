@@ -2,8 +2,8 @@
 
     sweep-hub            # SWEEP_STORE (a path, default hub.sqlite), SWEEP_BIND (host:port), SWEEP_TOKEN (the operator's bearer),
                          # SWEEP_AGENT_TOKENS (a JSON file {host: token}), SWEEP_REDIS (redis:// URL; FakeQueue without it),
-                         # SWEEP_SHARE (the hub's view of temp/harness), SWEEP_FRAMES (per-frame values beside the store),
-                         # SWEEP_SWEEP_S (the waiter's period, default 10)
+                         # SWEEP_SHARE (the exchange root: temp/harness on the pool), SWEEP_FRAMES (per-frame values beside the store),
+                         # SWEEP_HOST (the hub's own host row: the runtime that runs inventory), SWEEP_SWEEP_S (the waiter's period, default 10)
 """
 import os
 import threading
@@ -40,10 +40,11 @@ def body_fields(request):
     return []
 
 
-def create_app(store, queue, token=None, agent_tokens=None, share=None, frames=None):
+def create_app(store, queue, token=None, agent_tokens=None, share=None, frames=None, hub_host=None):
     app = FastAPI(title="sweep hub", description="the measurement harness's record: every write is a verb, checked in one transaction")
     tokens = auth.Tokens(token, dict(agent_tokens or {}))
     app.state.store, app.state.queue, app.state.tokens, app.state.share, app.state.frames = store, queue, tokens, share, frames
+    app.state.hub_host = hub_host
 
     if tokens.configured:
         @app.middleware("http")
@@ -90,7 +91,7 @@ def main():
     tokens = auth.load_tokens(os.environ)
     queue = RedisQueue(os.environ["SWEEP_REDIS"]) if os.environ.get("SWEEP_REDIS") else FakeQueue()
     app = create_app(store, queue, token=tokens.operator, agent_tokens=tokens.agents,
-                     share=os.environ.get("SWEEP_SHARE"), frames=os.environ.get("SWEEP_FRAMES"))
+                     share=os.environ.get("SWEEP_SHARE"), frames=os.environ.get("SWEEP_FRAMES"), hub_host=os.environ.get("SWEEP_HOST"))
     threading.Thread(target=wait.run_forever, args=(store, queue, float(os.environ.get("SWEEP_SWEEP_S", "10"))), daemon=True).start()
     host, _, port = os.environ.get("SWEEP_BIND", "127.0.0.1:8000").rpartition(":")
     uvicorn.run(app, host=host or "127.0.0.1", port=int(port))

@@ -363,7 +363,7 @@ No writer derives its header from the first row it happens to have.
 
 <!-- BEGIN GENERATED: schema:reference -->
     host                   host · machine · ssh_host · os ∈ {linux, windows} · work_root
-                           · share_root · local_view · ffmpeg · notes · blocked                    FILE
+                           · local_view · ffmpeg · notes · blocked                                 FILE
     encoder_unit           encoder_unit_id · vendor ∈ {nvidia, amd, intel} · card · driver
                            · frontend ∈ {nvenc, vaapi, qsv} · codec ∈ {hevc, av1}                  FILE
     host_unit              host · encoder_unit_id · device                                         FILE
@@ -668,7 +668,6 @@ erDiagram
         TEXT ssh_host
         TEXT os "linux | windows"
         TEXT work_root
-        TEXT share_root
         TEXT local_view
         TEXT ffmpeg
         TEXT notes
@@ -1401,7 +1400,7 @@ each change of grain is exactly where an aggregation bug enters.
 | **calibrate** | a constant | the base arm's ladder, the population probe, the full-length encode | **`constant_value`** — a measured constant has no typed value; a policy one is typed with its reason |
 | **viewing** | a viewed pair, or an acceptance for a lane | reference-path encodes, KEPT | **`viewing_verdict`** — a person's; Stage 2 names it |
 | **the agent**, outside any run | an identity a host's agent reported | its own tools: the ffmpeg build's `-version`, `-filters` and sha, FFVship's version, the artifact it runs | **`host_identity`** — a plan pins the latest (`v_host_identity_current`), and a run for an artifact nobody reported is refused |
-| **the exchange** — publish · pull | a file on the share | a kept `encode`, or a `cut` | **`published`** — the sha the agent computed before the copy and the hub verified after it; a pull checks against it |
+| **the exchange** — publish · pull | a file at the hub | a kept `encode`, or a `cut` | **`published`** — the sha the agent computed before the send and the hub verified as it landed; a pull checks against it |
 
 ### Where the grain collapses — and what has to be true at each collapse
 
@@ -1605,7 +1604,7 @@ only proxy is that the analysis tools expose no raw-query path for a ranking que
 | `x_discarded_without_score` | an encode-stage reference encode discarded before it was scored -- staging is removed only on a clean finish | keep the encode until its score record lands; staging is removed only on a clean finish |
 | `x_arms_with_disjoint_bitrate_spans` | locate arms whose bitrate spans do not intersect on a window -- widen the locate sweep | widen the locate sweep on that window until every arm's bitrate span overlaps the others' |
 | `x_run_artifact_not_reported` | a run whose artifact and harness version its host never reported -- a plan is built for the code the node runs | start the agent on that host so it reports its identity, then plan the run again; a plan is never built for an artifact nobody reported |
-| `x_published_without_encode` | a published encode with no encode record behind it -- the share holds products of the record, never loose files | publish only cells that posted an encode record; remove the file from the share |
+| `x_published_without_encode` | a published encode with no encode record behind it -- the exchange holds products of the record, never loose files | publish only cells that posted an encode record; remove the file from the exchange |
 | `x_score_height_not_a_served_lanes` | a score under a run with no search at a height that is not a served lane's -- the height is a decision; a search-less run inherits the one its lanes share | score at the class's served lane's score_height; when the class serves lanes at two heights, author-search to name one |
 | `strata_covered` (script) | every inventory or quantile stratum has >= min_windows members satisfying its definition, and every character stratum has >= min_windows members carrying it | define-class with enough members for every stratum's min_windows, or a stratum whose min_windows the population can meet; a gap is a refusal, not a footnote |
 | `measured_config_was_measured` (script) | a `measured` shipped row's identity settings equal some cell's identity settings, on the shipped unit, in the evidence class | ship identity settings a cell in the evidence class was encoded with on that unit, or ship them as policy with the reason |

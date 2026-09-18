@@ -181,14 +181,14 @@ def check_tags(conn, tags):
 
 FIXTURE = r"""
 -- a host is a runtime; media-01 and eta each hold two, nas-01 (the hub's own) has no unit
-INSERT INTO host (host, machine, ssh_host, os, work_root, share_root, local_view, ffmpeg, notes, blocked) VALUES
- ('nas-01','nas-01','nas-01','linux','/srv/sweep','/srv/sweep',NULL,NULL,'the hub; the share is local',NULL),
- ('media-01','media-01','media-01','linux','/mnt/data/sweep','/mnt/nas-01/sweep',NULL,'/opt/jellyfin-ffmpeg/bin/ffmpeg',NULL,NULL),
- ('media-01-score','media-01','media-01','linux','/mnt/data/sweep-score','/mnt/nas-01/sweep','/mnt/data/sweep',NULL,'the score container; sees the encode container''s work root at the same path',NULL),
- ('htpc-01','htpc-01','htpc-01','linux','/run/media/system/data/sweep','/mnt/nas-01/sweep',NULL,'/ffmpeg/ffmpeg','root podman; the bind mount is the patched build',
+INSERT INTO host (host, machine, ssh_host, os, work_root, local_view, ffmpeg, notes, blocked) VALUES
+ ('nas-01','nas-01','nas-01','linux','/srv/sweep',NULL,NULL,'the hub; the exchange is local',NULL),
+ ('media-01','media-01','media-01','linux','/mnt/data/sweep',NULL,'/opt/jellyfin-ffmpeg/bin/ffmpeg',NULL,NULL),
+ ('media-01-score','media-01','media-01','linux','/mnt/data/sweep-score','/mnt/data/sweep',NULL,'the score container; sees the encode container''s work root at the same path',NULL),
+ ('htpc-01','htpc-01','htpc-01','linux','/run/media/system/data/sweep',NULL,'/ffmpeg/ffmpeg','root podman; the bind mount is the patched build',
   'mount the sweep tree into tdarr-node, point the work root at it, use /ffmpeg/ffmpeg, then clear this'),
- ('eta','eta','eta','windows','D:\sweep','\\nas-01\sweep',NULL,'c:\Program Files\jellyfin-ffmpeg\bin\ffmpeg.exe','native Windows, no bash',NULL),
- ('eta-wsl','eta','eta','linux','/home/sweep/work','/mnt/nas-01/sweep','/mnt/d/sweep',NULL,'the score container under WSL; eta''s own cells are scored through /mnt/d/sweep, its work root as WSL spells it',NULL);
+ ('eta','eta','eta','windows','D:\sweep',NULL,'c:\Program Files\jellyfin-ffmpeg\bin\ffmpeg.exe','native Windows, no bash',NULL),
+ ('eta-wsl','eta','eta','linux','/home/sweep/work','/mnt/d/sweep',NULL,'the score container under WSL; eta''s own cells are scored through /mnt/d/sweep, its work root as WSL spells it',NULL);
 
 INSERT INTO encoder_unit VALUES
  ('intel-b580-ihd26.2.2-qsv-av1','intel','Arc B580','iHD 26.2.2','qsv','av1'),
@@ -520,7 +520,7 @@ INSERT INTO shipped_setting VALUES
  (9,'nvenc.preset','p3','identity',NULL),(9,'nvenc.cq','34','identity',NULL);
 INSERT INTO routing_exclusion VALUES
  ('m4-ipad-le1080p-sdr','eta','eta is not yet measured on this class: the B580 column exists and eta has none');
--- what reached the share: one encode published for scoring elsewhere, and the source cut of a window, each with the sha both ends agreed on
+-- what reached the exchange: one encode published for scoring elsewhere, and the source cut of a window, each with the sha both ends agreed on
 INSERT INTO published VALUES
  ('runs/b580-qsv-av1/enc/c-a24-tng.mkv','b580-qsv-av1','c-a24-tng',NULL,'media-01',68000000,'3b1f0c9e7d5a4b2c1e0f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d','2026-09-03T02:10'),
  ('refsets/stage-1080p/tng.source.mkv',NULL,NULL,'tng.src','media-01',200000000,'9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f','2026-08-26T10:00');

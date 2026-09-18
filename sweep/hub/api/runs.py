@@ -5,7 +5,7 @@ reported silent, never as zero. The agent endpoints are sweep/hub/api/agents.py.
 import datetime as dt
 import json
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from sweep.hub import artifact, planner, store as st
@@ -33,15 +33,18 @@ class TitleRef(Body):
 
 
 class Inventory(Body):
-    host: str
     library: str
     titles: list[TitleRef]
 
 
 @router.post("/inventory")
-def inventory(body: Inventory, store=Depends(get_store), queue=Depends(get_queue)):
-    """A run on a host that mounts the library: the agent probes each named file and posts a title record."""
-    return _planned(store, queue, planner.plan_inventory, body.host, body.library, [t.model_dump() for t in body.titles], _now())
+def inventory(body: Inventory, request: Request, store=Depends(get_store), queue=Depends(get_queue)):
+    """A run on the hub's own runtime, where the library is local: its agent probes each named file and posts a title
+    record. No other host is offered: the paths are that runtime's spelling, and a rescan finds a title by its path."""
+    host = request.app.state.hub_host
+    if not host:
+        raise Refusal("the hub has no runtime of its own: SWEEP_HOST is unset", "set SWEEP_HOST to the hub's host row and run its agent beside it")
+    return _planned(store, queue, planner.plan_inventory, host, body.library, [t.model_dump() for t in body.titles], _now())
 
 
 class AdoptCut(Body):
@@ -135,14 +138,13 @@ def time_(body: Time, store=Depends(get_store), queue=Depends(get_queue)):
 class Publish(Body):
     run_id: str | None = None
     cut_ids: list[str] = []
-    via: str | None = None
 
 
 @router.post("/publish")
 def publish(body: Publish, store=Depends(get_store), queue=Depends(get_queue)):
-    """A publish job on a host's queue: a run's kept encodes or cuts copied to the share, sha both ends."""
+    """A publish job on a host's queue: a run's kept encodes or cuts sent to the hub, sha both ends."""
     with store.reading() as conn:
-        host, job = planner.plan_publish(conn, run_id=body.run_id, cut_ids=body.cut_ids, via=body.via)
+        host, job = planner.plan_publish(conn, run_id=body.run_id, cut_ids=body.cut_ids)
     return {"entry_id": queue.enqueue(host, None, job, kind="publish")}
 
 

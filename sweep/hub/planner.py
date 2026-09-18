@@ -74,10 +74,12 @@ def _served_lanes(conn, content_class_id):
 
 
 def _refset_holder(conn, machine, window_id):
-    """A host on the machine whose complete materialise run covered the window: its work root holds the reference set."""
+    """The host whose complete materialise run covered the window, on the machine or (machine None) anywhere: its work
+    root holds the reference set."""
+    where, args = ("AND h.machine = ? ", (machine, window_id)) if machine is not None else ("", (window_id,))
     row = conn.execute("SELECT r.host FROM run r JOIN host h ON h.host = r.host JOIN run_window rw ON rw.run_id = r.run_id "
-                       "WHERE r.stage = 'materialise' AND r.state = 'complete' AND h.machine = ? AND rw.window_id = ? "
-                       "ORDER BY r.finished_at DESC LIMIT 1", (machine, window_id)).fetchone()
+                       f"WHERE r.stage = 'materialise' AND r.state = 'complete' {where}AND rw.window_id = ? "
+                       "ORDER BY r.finished_at DESC LIMIT 1", args).fetchone()
     return None if row is None else row[0]
 
 
@@ -101,7 +103,7 @@ def _run_section(plan, host_row, identity, device=None, tools=None, **extra):
     return {"run_id": plan.run_id, "stage": plan.stage, "host": plan.host, "node_label": plan.node_label,
             "encoder_unit_id": plan.encoder_unit_id, "content_class_id": plan.content_class_id, "search_id": plan.search_id,
             "device": device, "tools": tools or {"ffmpeg": host_row["ffmpeg"]}, "work_root": host_row["work_root"],
-            "share_root": host_row["share_root"], "versions": artifact.pins(identity), "recipes": dict(RECIPES), "artifact": identity.artifact, **extra}
+            "versions": artifact.pins(identity), "recipes": dict(RECIPES), "artifact": identity.artifact, **extra}
 
 
 def _body(run, windows=(), inputs=(), cells=(), score=None, exchange_=(), **extra):
@@ -331,7 +333,7 @@ def plan_score(conn, run_id, now, scorer=None, keep=False):
         else:
             pub = _published(conn, relative)
             if pub is None:
-                raise Refusal(f"reference cut {cut['cut_id']} is neither on {scorer_row['machine']} nor on the share",
+                raise Refusal(f"reference cut {cut['cut_id']} is neither on {scorer_row['machine']} nor at the hub",
                               f"publish --cut {cut['cut_id']} first, or score on {alternative}")
             references[window_id] = {"path": exchange.work_path(scorer_row, relative), "pull": pub, "content_sha": cut["content_sha"]}
     cells = []
@@ -343,7 +345,7 @@ def plan_score(conn, run_id, now, scorer=None, keep=False):
         else:
             pub = _published(conn, relative)
             if pub is None:
-                raise Refusal(f"cell {key} of run {run_id} is not on the share", f"publish --run {run_id} first, or score on {alternative}")
+                raise Refusal(f"cell {key} of run {run_id} is not at the hub", f"publish --run {run_id} first, or score on {alternative}")
             encode = {"path": exchange.work_path(scorer_row, relative), "pull": pub}
         cells.append({"cell_key": key, "window_id": window_id, "encode": encode, "reference": references[window_id]})
     windows = tuple(sorted(references))
@@ -359,35 +361,34 @@ def plan_score(conn, run_id, now, scorer=None, keep=False):
 
 # ---------------------------------------------------------------- the exchange
 
-def plan_publish(conn, run_id=None, cut_ids=(), via=None):
-    """(host, job): the files an agent copies to the share -- a run's kept encodes, or cuts -- read through local_view when
-    another runtime on the machine does the writing (eta's encodes leave through eta-wsl)."""
-    files = []
+def plan_publish(conn, run_id=None, cut_ids=()):
+    """(host, job): the files an agent sends to the hub -- a run's kept encodes from the run's own host, or cuts from the
+    host whose materialise run holds them. One job is one host's; files on two hosts are two calls."""
+    if run_id is None and not cut_ids:
+        raise Refusal("publish names nothing", "give --run-id, --cut-ids, or both")
+    files, hosts = [], set()
     if run_id is not None:
         run = _row(conn, "run", run_id=run_id)
         owner = _row(conn, "host", host=run["host"])
-        via = via or run["host"]
-        via_row = _row(conn, "host", host=via)
         kept = conn.execute("SELECT c.cell_key FROM cell c JOIN encode e ON e.cell_key = c.cell_key AND e.kept = 1 WHERE c.run_id = ? ORDER BY c.cell_key", (run_id,)).fetchall()
         if not kept:
             raise Refusal(f"run {run_id} has no kept encode to publish", "publish a run whose encodes are kept; scoring discards them")
+        hosts.add(run["host"])
         for (key,) in kept:
             relative = exchange.share_path("enc", run_id=run_id, cell_key=key)
-            local = exchange.work_path(owner, relative) if via == run["host"] else exchange.viewed_path(via_row, owner, relative)
-            files.append({"local": local, "relative": relative, "run_id": run_id, "cell_key": key, "cut_id": None})
-    if cut_ids:
-        if via is None:
-            raise Refusal("publish --cut needs --via", "name the runtime that holds the reference set and can write the share")
-        via_row = _row(conn, "host", host=via)
+            files.append({"local": exchange.work_path(owner, relative), "relative": relative, "run_id": run_id, "cell_key": key, "cut_id": None})
     for cut_id in cut_ids:
         cut = _row(conn, "cut", cut_id=cut_id)
         relative = exchange.share_path("cut", reference_set_id=cut["reference_set_id"], window_id=cut["window_id"], cut_kind=cut["kind"])
-        holder = _refset_holder(conn, via_row["machine"], cut["window_id"])
+        holder = _refset_holder(conn, None, cut["window_id"])
         if holder is None:
-            raise Refusal(f"nothing on machine {via_row['machine']} holds {cut_id}", "materialise --adopt on a host of that machine first")
-        local = exchange.work_path(via_row, relative) if holder == via else exchange.viewed_path(via_row, _row(conn, "host", host=holder), relative)
-        files.append({"local": local, "relative": relative, "run_id": None, "cell_key": None, "cut_id": cut_id})
-    return via, {"kind": "publish", "by_host": via, "files": files}
+            raise Refusal(f"no complete materialise run holds {cut_id}", "materialise --adopt on a host first")
+        hosts.add(holder)
+        files.append({"local": exchange.work_path(_row(conn, "host", host=holder), relative), "relative": relative, "run_id": None, "cell_key": None, "cut_id": cut_id})
+    if len(hosts) != 1:
+        raise Refusal(f"the files are on {len(hosts)} hosts ({', '.join(sorted(hosts))})", "publish each host's in its own call")
+    (host,) = hosts
+    return host, {"kind": "publish", "by_host": host, "files": files}
 
 
 # ---------------------------------------------------------------- enqueue, done, claim

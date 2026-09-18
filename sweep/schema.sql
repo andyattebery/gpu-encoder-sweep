@@ -29,10 +29,9 @@ CREATE TABLE host (                                         -- a RUNTIME: an enc
   machine     TEXT NOT NULL,                              -- the box; the quiet-box rule is per machine
   ssh_host    TEXT NOT NULL,
   os          TEXT NOT NULL CHECK (os IN ('linux','windows')),
-  work_root   TEXT NOT NULL,
-  share_root  TEXT NOT NULL,                              -- the share in this host's spelling
+  work_root   TEXT NOT NULL,                              -- the exchange layout under it: runs/<run_id>/enc/, refsets/<reference_set_id>/
   local_view  TEXT,                                       -- how this runtime sees another's work root on the same machine
-  ffmpeg      TEXT,                                       -- the patched build's path on this host; NULL on a host with no units (the hub's own, a scorer)
+  ffmpeg      TEXT,                                       -- the patched build's path on this host; NULL on a host with no units (a scorer); the hub's own runtime names one and runs inventory
   notes       TEXT,
   blocked     TEXT                                        -- NULL = usable; otherwise THE FIX, and a run on it is refused at the moment of use
 ) STRICT;
@@ -658,16 +657,16 @@ CREATE TABLE host_identity (                                -- what the agent on
 -- @group measurement
 -- @class ROW
 -- @writer exchange
-CREATE TABLE published (                                    -- a file on the share, proven by sha on both ends: the agent's before the copy, the hub's after
-  path         TEXT PRIMARY KEY,                            -- share-relative, forward slashes: runs/<run_id>/enc/<cell_key>.mkv | refsets/<reference_set_id>/<window_id>.<kind>.mkv
+CREATE TABLE published (                                    -- a file in the exchange, proven by sha on both ends: the agent's before the send, the hub's as it landed
+  path         TEXT PRIMARY KEY,                            -- exchange-relative, forward slashes: runs/<run_id>/enc/<cell_key>.mkv | refsets/<reference_set_id>/<window_id>.<kind>.mkv
   run_id       TEXT REFERENCES run,                         -- an encode's run; NULL for a cut
   cell_key     TEXT REFERENCES cell,
   cut_id       TEXT REFERENCES cut,
-  by_host      TEXT NOT NULL REFERENCES host,               -- the runtime that wrote it: eta's encodes are written by eta-wsl through local_view
+  by_host      TEXT NOT NULL REFERENCES host,               -- the runtime that sent it: the run's host for an encode, the materialising host for a cut
   bytes        INTEGER NOT NULL,
   sha256       TEXT NOT NULL,
   published_at TEXT NOT NULL,
-  -- exactly one of an encode (with its run) or a cut: a file on the share is one product of the record, never a loose file
+  -- exactly one of an encode (with its run) or a cut: a file in the exchange is one product of the record, never a loose file
   CONSTRAINT published_names_one_thing CHECK ((cell_key IS NOT NULL) <> (cut_id IS NOT NULL) AND (cell_key IS NULL) = (run_id IS NULL))
 ) STRICT;
 
@@ -1231,8 +1230,8 @@ CREATE VIEW x_run_artifact_not_reported AS
    WHERE NOT EXISTS (SELECT 1 FROM host_identity i WHERE i.host = r.host
                       AND i.artifact = r.artifact AND i.harness_version = r.harness_version);
 
--- @check a published encode with no encode record behind it -- the share holds products of the record, never loose files
--- @fix publish only cells that posted an encode record; remove the file from the share
+-- @check a published encode with no encode record behind it -- the exchange holds products of the record, never loose files
+-- @fix publish only cells that posted an encode record; remove the file from the exchange
 CREATE VIEW x_published_without_encode AS
   SELECT p.path FROM published p WHERE p.cell_key IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM encode e WHERE e.cell_key = p.cell_key);

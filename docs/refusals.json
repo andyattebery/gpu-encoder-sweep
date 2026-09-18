@@ -357,7 +357,7 @@
      "today": ["tools/push_node.py"],
      "test": "A short or altered copy exits non-zero having asserted nothing.",
      "disposition": "process",
-     "how": "nothing is pushed: the plan names the artifact it was built for and the hub hands a run only to an agent whose heartbeat reports it; a transferred file is a `published` row carrying the sha the agent computed before the copy and the hub verified after it"},
+     "how": "nothing is pushed: the plan names the artifact it was built for and the hub hands a run only to an agent whose heartbeat reports it; a transferred file is a `published` row carrying the sha the agent computed before the send and the hub verified as it landed"},
 
     {"id": "orc-blocked-is-a-refusal-at-the-moment-of-use",
      "invariant": "An unusable host refuses at the moment of use, with the fix in the message.",

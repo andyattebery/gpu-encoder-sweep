@@ -71,7 +71,6 @@ CONSTRAINT_FIXES = {
 # (table, column) -> the fix, where `give --column` is not enough
 NOT_NULL_FIXES = {
     ("host", "machine"): "give --machine: the box this runtime is on; the quiet-box rule is per machine",
-    ("host", "share_root"): "give --share-root: the share in this host's spelling",
     ("run", "artifact"): "a plan names the artifact it was built for; the agent reports it",
     ("timing", "frames"): "count the leg's frames; exit status is never the evidence",
     ("cut", "content_sha"): "hash the decoded frames, never the container",

@@ -10,7 +10,7 @@ from sweep.hub import refusals
 from tests.hub_helpers import client_for, fixture_store, post
 
 HOST = {"host": "htpc-02", "ssh_host": "htpc-02", "os": "linux", "machine": "htpc-02", "work_root": "/data/sweep",
-        "share_root": "/mnt/nas-01/sweep", "ffmpeg": "/ffmpeg/ffmpeg"}
+        "ffmpeg": "/ffmpeg/ffmpeg"}
 
 
 class Handlers(unittest.TestCase):
@@ -31,7 +31,7 @@ class Handlers(unittest.TestCase):
         status, text = post(self.client, "/catalogue/add-host", dict(HOST, devcie="x"))
         self.assertEqual(status, 422)
         self.assertEqual(text, "REFUSING: add-host does not take 'devcie' -- the fields are: host, ssh_host, os, machine, "
-                               "work_root, share_root, ffmpeg, local_view, notes")
+                               "work_root, ffmpeg, local_view, notes")
 
     def test_missing_field_is_refused(self):
         body = dict(HOST)

@@ -34,6 +34,19 @@ class Dockerfiles(unittest.TestCase):
                 self.assertIn("/etc/sweep-artifact", text)
                 self.assertNotIn(":latest", text.replace("tdarr_node:latest resolved", ""))    # the comment may say where the digest came from
 
+    def test_every_image_carries_the_same_jellyfin_ffmpeg_and_the_hub_carries_the_agent(self):
+        # the hub's image also runs the nas-01 agent (inventory probes the library where it is local), so it pins the
+        # nodes' ffmpeg build and installs the node extra; a tag that drifts on one image is a different measurement
+        tags = {}
+        for name in self.FILES:
+            text = (ROOT / "docker" / f"Dockerfile.{name}").read_text()
+            found = re.findall(r"^ARG JELLYFIN_FFMPEG_TAG=(\S+)$", text, re.M)
+            self.assertEqual(len(found), 1, f"{name} pins JELLYFIN_FFMPEG_TAG once")
+            tags[name] = found[0]
+        self.assertEqual(len(set(tags.values())), 1, tags)
+        hub = (ROOT / "docker" / "Dockerfile.hub").read_text()
+        self.assertRegex(hub, r"uv sync --locked --extra hub --extra node")
+
     def test_the_images_workflow_builds_every_image_and_pins_its_actions(self):
         text = (ROOT / ".github" / "workflows" / "images.yaml").read_text()
         for name in self.FILES:

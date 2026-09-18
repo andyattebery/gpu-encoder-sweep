@@ -17,7 +17,6 @@ class AddHost(Body):
     os: str
     machine: str
     work_root: str
-    share_root: str
     ffmpeg: str | None = None
     local_view: str | None = None
     notes: str | None = None

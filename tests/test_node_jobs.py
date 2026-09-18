@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """sweep/node/jobs.py: what the agent does with one cell -- encode it and count its frames, probe a title, adopt a cut,
-score by S1, time by T1, publish with a sha both ends -- against the fake tools under tests/fake_tools.
+score by S1, time by T1, publish and pull through the hub with a sha both ends -- against the fake tools under
+tests/fake_tools and a mock hub.
 
     python3 -m unittest tests.test_node_jobs
 """
@@ -8,10 +9,11 @@ import hashlib
 import json
 import os
 import pathlib
-import stat
 import tempfile
 import unittest
 from unittest import mock
+
+import httpx
 
 from sweep.hub import build
 from sweep.node import jobs
@@ -19,12 +21,22 @@ from sweep.node import jobs
 TOOLS = pathlib.Path(__file__).parent / "fake_tools"
 
 
-def ctx_for(root, share=None):
+def ctx_for(root, client=None):
     work = pathlib.Path(root) / "work"
     (work / "refsets" / "rs").mkdir(parents=True)
-    return jobs.Context(host="media-01", os="linux", work_root=str(work), share_root=None if share is None else str(share),
+    return jobs.Context(host="media-01", os="linux", work_root=str(work), client=client,
                         ffmpeg=[str(TOOLS / "ffmpeg")], ffprobe=[str(TOOLS / "ffprobe")], ffvship=[str(TOOLS / "FFVship")],
                         score_ffmpeg=[str(TOOLS / "ffmpeg")], run_dir=work / "runs" / "r1")
+
+
+def hub_client(handler):
+    """An httpx client whose hub is the handler: (request) -> Response, with every request kept for the assertions."""
+    seen = []
+
+    def route(request):
+        seen.append(request)
+        return handler(request)
+    return httpx.Client(base_url="http://hub.test", transport=httpx.MockTransport(route)), seen
 
 
 def cut_file(ctx, name="tng.reference.mkv", size=200000):
@@ -153,41 +165,58 @@ class Scoring(unittest.TestCase):
         jobs.score_cell(dict(self.cell, cell_key="k2"), dict(self.score, keep=True), self.ctx)
         self.assertEqual(self.ctx.refcache.hits, 1)
 
-    def test_a_pull_is_verified_by_sha_before_use(self):
-        share = self.root / "share"
-        (share / "runs" / "r0" / "enc").mkdir(parents=True)
-        (share / "runs" / "r0" / "enc" / "k1.mkv").write_bytes(b"p" * 3000)
-        ctx = ctx_for(self.root / "two", share=share)
+    def test_a_pull_streams_from_the_hub_and_is_verified_by_sha_before_use(self):
+        data = b"p" * 3000
+        client, seen = hub_client(lambda r: httpx.Response(200, content=data) if r.url.path == "/exchange/files/runs/r0/enc/k1.mkv" else httpx.Response(422, text="REFUSING: runs/r0/enc/k2.mkv is not published -- publish it first"))
+        ctx = ctx_for(self.root / "two", client=client)
         pulled = pathlib.Path(ctx.work_root) / "runs" / "r0" / "enc" / "k1.mkv"
-        good = {"relative": "runs/r0/enc/k1.mkv", "sha256": hashlib.sha256(b"p" * 3000).hexdigest(), "bytes": 3000}
+        good = {"relative": "runs/r0/enc/k1.mkv", "sha256": hashlib.sha256(data).hexdigest(), "bytes": 3000}
         self.assertEqual(jobs.pull(good, str(pulled), ctx), str(pulled))
-        self.assertEqual(pulled.read_bytes(), b"p" * 3000)
-        with self.assertRaises(jobs.JobError):
-            jobs.pull(dict(good, sha256="0" * 64), str(pulled.with_name("k2.mkv")), ctx)
+        self.assertEqual(pulled.read_bytes(), data)
+        self.assertEqual(seen[0].method, "GET")
+        with self.assertRaises(jobs.JobError) as cm:
+            jobs.pull(dict(good, sha256="0" * 64), str(pulled.with_name("k1b.mkv")), ctx)
+        self.assertIn("differs after the pull", str(cm.exception))
+        with self.assertRaises(jobs.JobError) as cm:
+            jobs.pull(dict(good, relative="runs/r0/enc/k2.mkv"), str(pulled.with_name("k2.mkv")), ctx)
+        self.assertEqual(str(cm.exception), "REFUSING: runs/r0/enc/k2.mkv is not published -- publish it first -- the hub refused the pull")
+        self.assertEqual(sorted(f.name for f in pulled.parent.iterdir()), ["k1.mkv"])                # a refused pull leaves nothing behind
 
 
 class Publishing(unittest.TestCase):
-    def test_publish_copies_shas_both_ends_and_probes_the_share_first(self):
-        root = pathlib.Path(tempfile.mkdtemp())
-        share = root / "share"
-        share.mkdir()
-        ctx = ctx_for(root, share=share)
-        local = root / "big.mkv"
-        local.write_bytes(b"q" * 123456)
-        spec = {"local": str(local), "relative": "runs/r1/enc/k1.mkv", "run_id": "r1", "cell_key": "k1", "cut_id": None}
-        body = jobs.publish_file(spec, ctx)
-        self.assertEqual((body["path"], body["by_host"], body["bytes"], body["run_id"], body["cell_key"], body["cut_id"]), ("runs/r1/enc/k1.mkv", "media-01", 123456, "r1", "k1", None))
-        self.assertEqual(body["sha256"], hashlib.sha256(b"q" * 123456).hexdigest())
-        self.assertEqual((share / "runs" / "r1" / "enc" / "k1.mkv").read_bytes(), b"q" * 123456)
-        self.assertEqual(sorted(p.name for p in share.iterdir()), ["runs"])                             # the probe file is gone
-        os.chmod(share, stat.S_IRUSR | stat.S_IXUSR)
-        try:
-            with self.assertRaises(jobs.JobError) as cm:
-                jobs.publish_file(spec, ctx)
-        finally:
-            os.chmod(share, stat.S_IRWXU)
-        self.assertIn("the share is not writable from media-01", str(cm.exception))
-        self.assertIn("the role mounts temp/harness read-write", str(cm.exception))
+    def setUp(self):
+        self.root = pathlib.Path(tempfile.mkdtemp())
+        self.local = self.root / "big.mkv"
+        self.local.write_bytes(b"q" * 123456)
+        self.spec = {"local": str(self.local), "relative": "runs/r1/enc/k1.mkv", "run_id": "r1", "cell_key": "k1", "cut_id": None}
+
+    def test_publish_puts_the_file_with_its_sha_and_length_declared(self):
+        client, seen = hub_client(lambda r: httpx.Response(200, json={"ok": True}))
+        jobs.publish_file(self.spec, ctx_for(self.root, client=client))
+        (r,) = seen
+        self.assertEqual((r.method, r.url.path), ("PUT", "/exchange/files/runs/r1/enc/k1.mkv"))
+        self.assertEqual(dict(r.url.params), {"by_host": "media-01", "bytes": "123456", "sha256": hashlib.sha256(b"q" * 123456).hexdigest(), "run_id": "r1", "cell_key": "k1"})
+        self.assertEqual(r.headers["content-length"], "123456")
+        self.assertNotIn("transfer-encoding", r.headers)
+        self.assertEqual(r.read(), b"q" * 123456)
+
+    def test_a_cut_names_its_cut_id_and_nothing_else(self):
+        client, seen = hub_client(lambda r: httpx.Response(200, json={"ok": True}))
+        jobs.publish_file({"local": str(self.local), "relative": "refsets/rs/tng.reference.mkv", "run_id": None, "cell_key": None, "cut_id": "tng.ref"}, ctx_for(self.root, client=client))
+        self.assertEqual(dict(seen[0].url.params), {"by_host": "media-01", "bytes": "123456", "sha256": hashlib.sha256(b"q" * 123456).hexdigest(), "cut_id": "tng.ref"})
+
+    def test_a_refused_publish_is_the_hubs_refusal(self):
+        client, _ = hub_client(lambda r: httpx.Response(422, text="REFUSING: the hub already holds a different runs/r1/enc/k1.mkv -- a published file is never overwritten"))
+        with self.assertRaises(jobs.JobError) as cm:
+            jobs.publish_file(self.spec, ctx_for(self.root, client=client))
+        self.assertEqual(str(cm.exception), "REFUSING: the hub already holds a different runs/r1/enc/k1.mkv -- a published file is never overwritten -- the hub refused the publish")
+
+    def test_a_missing_local_file_is_refused_before_anything_is_sent(self):
+        client, seen = hub_client(lambda r: httpx.Response(200, json={"ok": True}))
+        with self.assertRaises(jobs.JobError) as cm:
+            jobs.publish_file(dict(self.spec, local=str(self.root / "gone.mkv")), ctx_for(self.root, client=client))
+        self.assertIn("gone.mkv does not exist on media-01", str(cm.exception))
+        self.assertEqual(seen, [])
 
 
 if __name__ == "__main__":

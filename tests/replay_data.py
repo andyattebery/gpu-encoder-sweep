@@ -73,15 +73,15 @@ def score(key, q, steps=()):
 # ---------------------------------------------------------------- the catalogue
 
 HOSTS = [
-    dict(host="nas-01", machine="nas-01", ssh_host="nas-01", os="linux", work_root="/srv/sweep", share_root="/srv/sweep", notes="the hub; the share is local"),
-    dict(host="media-01", machine="media-01", ssh_host="media-01", os="linux", work_root="/mnt/data/sweep", share_root="/mnt/nas-01/sweep", ffmpeg="/opt/jellyfin-ffmpeg/bin/ffmpeg"),
-    dict(host="media-01-score", machine="media-01", ssh_host="media-01", os="linux", work_root="/mnt/data/sweep-score", share_root="/mnt/nas-01/sweep",
+    dict(host="nas-01", machine="nas-01", ssh_host="nas-01", os="linux", work_root="/srv/sweep", notes="the hub; the exchange is local"),
+    dict(host="media-01", machine="media-01", ssh_host="media-01", os="linux", work_root="/mnt/data/sweep", ffmpeg="/opt/jellyfin-ffmpeg/bin/ffmpeg"),
+    dict(host="media-01-score", machine="media-01", ssh_host="media-01", os="linux", work_root="/mnt/data/sweep-score",
          local_view="/mnt/data/sweep", notes="the score container; sees the encode container's work root at the same path"),
-    dict(host="htpc-01", machine="htpc-01", ssh_host="htpc-01", os="linux", work_root="/run/media/system/data/sweep", share_root="/mnt/nas-01/sweep",
+    dict(host="htpc-01", machine="htpc-01", ssh_host="htpc-01", os="linux", work_root="/run/media/system/data/sweep",
          ffmpeg="/ffmpeg/ffmpeg", notes="root podman; the bind mount is the patched build"),
-    dict(host="eta", machine="eta", ssh_host="eta", os="windows", work_root="D:\\sweep", share_root="\\\\nas-01\\sweep",
+    dict(host="eta", machine="eta", ssh_host="eta", os="windows", work_root="D:\\sweep",
          ffmpeg="c:\\Program Files\\jellyfin-ffmpeg\\bin\\ffmpeg.exe", notes="native Windows, no bash"),
-    dict(host="eta-wsl", machine="eta", ssh_host="eta", os="linux", work_root="/home/sweep/work", share_root="/mnt/nas-01/sweep", local_view="/mnt/d/sweep",
+    dict(host="eta-wsl", machine="eta", ssh_host="eta", os="linux", work_root="/home/sweep/work", local_view="/mnt/d/sweep",
          notes="the score container under WSL; eta's own cells are scored through /mnt/d/sweep, its work root as WSL spells it"),
 ]
 UNITS = [

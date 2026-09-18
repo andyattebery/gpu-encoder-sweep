@@ -19,7 +19,7 @@ Hosts here are `box-a`, `box-a-score` and `nas`; the paths are illustrative. Sub
 
 A running hub, its URL, and a token. Deployment is not this document's subject: `docker/README.md`
 says what a role must give each container, and `ARCHITECTURE.md` says how the hub, the queue, the
-share and the agents fit together.
+exchange and the agents fit together.
 
 ```sh
 uv tool install "gpu-encoder-sweep[cli] @ git+https://github.com/andyattebery/gpu-encoder-sweep@<tag>"
@@ -87,7 +87,7 @@ One subcommand per endpoint; every flag is one field of the request body. Nothin
 
 ```sh
 sweep add-host --host box-a --ssh-host box-a --os linux --machine box-a \
-               --work-root /srv/sweep --share-root /share
+               --work-root /srv/sweep
 ```
 
 **Types are checked at the CLI before the request is sent.** A list flag takes a comma-separated
@@ -144,13 +144,13 @@ below are what it is made of.
 {
   "hosts": [
     {"host": "nas", "ssh_host": "nas", "os": "linux", "machine": "nas",
-     "work_root": "/data", "share_root": "/share",
-     "notes": "the hub's own runtime: no encoder, no agent"},
+     "work_root": "/data", "ffmpeg": "/opt/jellyfin-ffmpeg/bin/ffmpeg",
+     "notes": "the hub's own runtime: no encoder; its agent runs inventory where the library is local"},
     {"host": "box-a", "ssh_host": "box-a", "os": "linux", "machine": "box-a",
-     "work_root": "/srv/sweep", "share_root": "/share",
+     "work_root": "/srv/sweep",
      "ffmpeg": "/opt/jellyfin-ffmpeg/bin/ffmpeg"},
     {"host": "box-a-score", "ssh_host": "box-a", "os": "linux", "machine": "box-a",
-     "work_root": "/srv/sweep-score", "share_root": "/share", "local_view": "/srv/sweep"}
+     "work_root": "/srv/sweep-score", "local_view": "/srv/sweep"}
   ],
   "units": [
     {"encoder_unit_id": "intel-arc-ihd26-qsv-av1", "vendor": "intel", "card": "Arc B580",
@@ -295,14 +295,15 @@ sweep author-chain --lane tablet-1080p-sdr --host box-a \
 The sample is the content a measurement is *about*. Getting it wrong is the failure this harness was
 built after, so the path has more steps than it first looks like it needs.
 
-**Scan the library.** `inventory` is a run: the hub plans it, an agent probes each file and posts a
-record per title.
+**Scan the library.** `inventory` is a run on the hub's own runtime — the host `SWEEP_HOST` names,
+where the library is local — and takes no `--host`: the paths are that runtime's spelling, and a
+rescan finds a title by its path. Its agent probes each file and posts a record per title.
 
 ```
-$ sweep inventory --host box-a --library tv \
+$ sweep inventory --library tv \
     --titles '[{"title_id":"tng","path":"/library/tng.S01E01.mkv"},
                {"title_id":"parks","path":"/library/parks.S01E01.mkv"}]'
-{"run_id":"inventory-box-a-20260917T051935186183Z","entry_id":"1"}
+{"run_id":"inventory-nas-20260917T051935186183Z","entry_id":"1"}
 ```
 
 **Pin the windows.** A window is a cut of a title — `(title, ss, t)` and nothing else. Choosing one
@@ -476,17 +477,19 @@ twice, in two different ways: planning a timing run onto a machine that is busy 
 outright, and if the machine becomes busy afterwards the agent is simply not handed the run until it
 is quiet again — the entry waits in the queue rather than being lost.
 
-**Moving bytes between machines** is a publish job, not a run. The agent copies each file to the
-share and hashes it before the copy; the hub hashes it again at its own view of the share before
-recording it, so a transfer is proven rather than assumed:
+**Moving bytes between machines** is a publish job, not a run, and no machine mounts anything for
+it. The agent hashes each file and streams it to the hub with the sha and size declared; the hub
+hashes the stream as it lands, refuses a short or corrupt one, and records the file only once it
+holds it, so a transfer is proven rather than assumed. A run's encodes publish from the run's own
+host:
 
 ```
-$ sweep publish --run-id viewing-native-1080p-sdr-20260917T051935380089Z --via box-a
+$ sweep publish --run-id viewing-native-1080p-sdr-20260917T051935380089Z
 {"entry_id":"6"}
 ```
 
-`--via` is the runtime that does the writing, which matters when the owner of the files cannot write
-to the share itself. `--cut-ids` publishes reference cuts instead of a run's encodes.
+`--cut-ids` publishes reference cuts instead, from the host whose materialise run holds them. A
+scorer on another machine pulls what it needs back from the hub and checks the recorded sha.
 
 ---
 
@@ -628,7 +631,7 @@ describes those stages; they do not exist as verbs.
 | `encode` | plan an encode run: a search's ladder, or named cells as a viewing run |
 | `score` | score a run's encodes on a host with a scorer |
 | `time` | time a run's configurations through the lane's chain, on a quiet machine |
-| `publish` | copy a run's encodes or some cuts to the share, hashed both ends |
+| `publish` | send a run's encodes or some cuts to the hub, hashed both ends |
 | `abandon` | stop a run; the agent reads it between cells |
 | `watch` | stream a run's events until it finishes |
 | `status` | every run, host, queue depth, heartbeat and reported artifact |

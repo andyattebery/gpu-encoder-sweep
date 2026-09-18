@@ -1,6 +1,6 @@
 """Helpers for the agent's tests. Not a test module: nothing here is named in the Makefile.
 
-hub_and_agent() builds an in-process hub whose one machine holds an encode runtime and a score runtime, both pointed
+hub_and_agent() builds an in-process hub whose one machine holds an encode runtime (the hub's own, so it runs inventory) and a score runtime, both pointed
 at the fake tools under tests/fake_tools, authors the smallest catalogue a run needs through the API, and returns the
 pieces: the store, the client, the queue (a FakeQueue with a clock the test advances, or the queue given) and an
 Agent whose HTTP client is the TestClient itself. The sample (titles, cuts) is made by the agent's own inventory and
@@ -26,9 +26,9 @@ def smoke_catalogue(client, root):
     for d in (work, work_score, share):
         d.mkdir(parents=True, exist_ok=True)
     steps = [
-        ("/catalogue/add-host", {"host": "enc", "ssh_host": "enc", "os": "linux", "machine": "box", "work_root": str(work), "share_root": str(share), "ffmpeg": str(TOOLS / "ffmpeg")}),
-        ("/catalogue/add-host", {"host": "sco", "ssh_host": "enc", "os": "linux", "machine": "box", "work_root": str(work_score), "share_root": str(share), "local_view": str(work)}),
-        ("/catalogue/add-host", {"host": "far", "ssh_host": "far", "os": "linux", "machine": "elsewhere", "work_root": str(root / "far"), "share_root": str(share)}),
+        ("/catalogue/add-host", {"host": "enc", "ssh_host": "enc", "os": "linux", "machine": "box", "work_root": str(work), "ffmpeg": str(TOOLS / "ffmpeg")}),
+        ("/catalogue/add-host", {"host": "sco", "ssh_host": "enc", "os": "linux", "machine": "box", "work_root": str(work_score), "local_view": str(work)}),
+        ("/catalogue/add-host", {"host": "far", "ssh_host": "far", "os": "linux", "machine": "elsewhere", "work_root": str(root / "far")}),
         ("/catalogue/add-unit", {"encoder_unit_id": UNIT, "vendor": "intel", "card": "Fake", "driver": "iHD 1", "frontend": "qsv", "codec": "av1", "host": "enc", "device": "/dev/dri/by-path/pci-0000:00:00.0-render"}),
         ("/catalogue/add-concept", {"canonical_id": "quality_anchor", "description": "the anchor"}),
         ("/catalogue/add-concept", {"canonical_id": "rate_control_mode", "description": "the mode"}),
@@ -85,7 +85,7 @@ def hub_and_agent(queue=None):
     now = [0.0]
     q = queue or FakeQueue(clock=lambda: now[0])
     store = Store()
-    client = client_for(store, queue=q, share=root / "share", frames=root / "frames")
+    client = client_for(store, queue=q, share=root / "share", frames=root / "frames", hub_host="enc")
     dirs = smoke_catalogue(client, root)
     return Pieces(store, client, q, root, dirs, now)
 
@@ -95,7 +95,7 @@ def make_sample(pieces):
     titles, stage = title_files(pieces.root)
     agent = pieces.agent("enc")
     agent.start()
-    status, text = post(pieces.client, "/runs/inventory", {"host": "enc", "library": "tv", "titles": [{"title_id": w, "path": str(p)} for w, p in titles.items()]})
+    status, text = post(pieces.client, "/runs/inventory", {"library": "tv", "titles": [{"title_id": w, "path": str(p)} for w, p in titles.items()]})
     assert status == 200, text
     assert agent.serve_once() == json.loads(text)["run_id"]
     for w in titles:

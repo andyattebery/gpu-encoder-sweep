@@ -37,7 +37,7 @@ class Catalogue(unittest.TestCase):
 
     # ---- add-host
     HOST = {"host": "htpc-02", "ssh_host": "htpc-02", "os": "linux", "machine": "htpc-02", "work_root": "/data/sweep",
-            "share_root": "/mnt/nas-01/sweep", "ffmpeg": "/ffmpeg/ffmpeg"}
+            "ffmpeg": "/ffmpeg/ffmpeg"}
 
     def test_add_host_writes_the_row(self):
         self.ok("add-host", self.HOST)

@@ -18,7 +18,7 @@ GROUPS = ("hosts", "units", "scorers")
 # what the document governs, column for column. `host.blocked` is deliberately absent: blocking is an operational
 # act with its own two verbs, and a document carrying it would unblock a host on the next apply of a stale file.
 COLUMNS = {
-    "host": ("host", "ssh_host", "os", "machine", "work_root", "share_root", "ffmpeg", "local_view", "notes"),
+    "host": ("host", "ssh_host", "os", "machine", "work_root", "ffmpeg", "local_view", "notes"),
     "encoder_unit": ("encoder_unit_id", "vendor", "card", "driver", "frontend", "codec"),
     "host_unit": ("host", "encoder_unit_id", "device"),
     "scorer": ("host", "ffvship", "score_ffmpeg", "metric_backend", "gpu_id", "cache_dir"),
